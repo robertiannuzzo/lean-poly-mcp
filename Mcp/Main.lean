@@ -1,10 +1,12 @@
-/-!
-The MCP server executable: JSON-RPC 2.0 over stdio, newline-delimited — the same
-framing `v1-idris/gui/server_gui.py` already speaks, so that bridge survives the port.
+import Mcp.Transport
 
-Not yet implemented; this stub exists so the `server` target in `lakefile.toml`
-resolves.
+/-!
+The MCP server executable: JSON-RPC 2.0 over stdio, newline-delimited.
+
+    echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./.lake/build/bin/server
 -/
 
-def main : IO Unit :=
-  IO.eprintln "lean-poly-mcp: not implemented yet (see docs/lean-upgrade-plan.md)"
+def main : IO Unit := do
+  Mcp.logErr "lean-poly-mcp server starting"
+  Mcp.loop (← IO.getStdin) (← IO.getStdout)
+  Mcp.logErr "lean-poly-mcp server exiting (stdin closed)"

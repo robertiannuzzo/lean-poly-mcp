@@ -4,10 +4,16 @@ An MCP server whose interface **is** a polynomial functor, written in Lean 4, dr
 an agent that autoformalizes category theory — where Lean's kernel is the only thing
 ever trusted.
 
-> **Status: scaffolding.** The repository structure, toolchain pin, and design are in
-> place; the Lean implementation is not written yet. See
-> [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
-> [`v1-idris/`](v1-idris/) for the working Idris2 predecessor this is derived from.
+> **Status: Phases 1–2 done.** The Poly kernel is proved and axiom-free; the MCP
+> server builds, runs, and answers real JSON-RPC over stdio. The oracle, the
+> autoformalization tools, the agent, Aristotle, and the front end are not written
+> yet. See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan
+> and [`v1-idris/`](v1-idris/) for the Idris2 predecessor this is derived from.
+
+```sh
+lake build server
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./.lake/build/bin/server
+```
 
 ## The idea
 
