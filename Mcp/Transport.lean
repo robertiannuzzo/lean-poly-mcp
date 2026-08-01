@@ -18,7 +18,9 @@ the categorical object are one term.
 
 namespace Mcp
 
-open Lean Lean.JsonRpc
+-- Both `Lean` and `Lean.JsonRpc` export a `Message`, so `JsonRpc.Message` stays
+-- qualified below rather than opening the namespace wholesale.
+open Lean
 open Poly
 
 def logErr (s : String) : IO Unit := do
@@ -26,17 +28,21 @@ def logErr (s : String) : IO Unit := do
   err.putStrLn s
   err.flush
 
-def writeMessage (out : IO.FS.Stream) (m : Message) : IO Unit := do
+def writeMessage (out : IO.FS.Stream) (m : JsonRpc.Message) : IO Unit := do
   out.putStr ((toJson m).compress ++ "\n")
   out.flush
 
-/-- Answer a decoded request. The dispatch is `(sectionEquiv MCP).toFun server`, which
-`dispatch_eq_handle` proves is `handle` — written this way deliberately, so the live
-path goes through the lens rather than around it. -/
-def respond (id : RequestID) (m : Method) : Message :=
-  .response id (encodeResult m ((sectionEquiv MCP).toFun server m))
+/-- Answer a decoded request by running the server — `Mcp.handle`, the effectful
+section of the coproduct. On the pure summand this is still literally the Phase 2
+lens: `handle_inl` proves `handle env (.inl m) = pure (pureHandle m)` by `rfl`, and
+`pureHandle` is what `pureServer` projects to. The live path still goes through the
+categorical object rather than around it; it is now a Kleisli section rather than a
+`Lens MCP y`, for the reason spelled out in `Poly/Kleisli.lean`. -/
+def respond (env : Lean.Environment) (id : JsonRpc.RequestID) (m : Method) : IO JsonRpc.Message := do
+  let result ← handle env m
+  return .response id (encodeResult m result)
 
-def handleMessage (out : IO.FS.Stream) : Message → IO Unit
+def handleMessage (env : Lean.Environment) (out : IO.FS.Stream) : JsonRpc.Message → IO Unit
   | .request id method params? => do
     match decodeRequest method (params?.map toJson) with
     | .unknownMethod =>
@@ -44,29 +50,29 @@ def handleMessage (out : IO.FS.Stream) : Message → IO Unit
     | .badParams =>
       writeMessage out (.responseError id .invalidParams
         s!"{method}: missing or malformed params" none)
-    | .ok m => writeMessage out (respond id m)
+    | .ok m => writeMessage out (← respond env id m)
   | .notification method _ => logErr s!"notification: {method}"
   | .response _ _ => logErr "unexpected response received by server"
   | .responseError _ _ msg _ => logErr s!"unexpected error response received by server: {msg}"
 
-def handleLine (out : IO.FS.Stream) (line : String) : IO Unit := do
+def handleLine (env : Lean.Environment) (out : IO.FS.Stream) (line : String) : IO Unit := do
   match Json.parse line with
   | .error e => logErr s!"could not parse line as JSON: {e}"
   | .ok j =>
-    match fromJson? (α := Message) j with
+    match fromJson? (α := JsonRpc.Message) j with
     | .error e => logErr s!"could not parse message: {e}"
-    | .ok msg => handleMessage out msg
+    | .ok msg => handleMessage env out msg
 
 /-- Read newline-delimited messages until stdin closes. -/
-partial def loop (inp out : IO.FS.Stream) : IO Unit := do
+partial def loop (env : Lean.Environment) (inp out : IO.FS.Stream) : IO Unit := do
   let line ← inp.getLine
   -- `getLine` returns "" only at EOF; a blank line comes back as "\n".
   if line.isEmpty then
     return
   if line.all Char.isWhitespace then
-    loop inp out
+    loop env inp out
   else
-    handleLine out line
-    loop inp out
+    handleLine env out line
+    loop env inp out
 
 end Mcp

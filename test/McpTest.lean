@@ -17,25 +17,25 @@ open Mcp
 test so a future refactor that decouples them fails here.
 -/
 
-example : (sectionEquiv MCP).toFun server = handle := dispatch_eq_handle
+example : (sectionEquiv PureMCP).toFun pureServer = pureHandle := pureDispatch_eq_handle
 
-#guard ((sectionEquiv MCP).toFun server .listTools).length = 1
+#guard ((sectionEquiv PureMCP).toFun pureServer .listTools).length = 1
 
 /-! ## Dispatch -/
 
-#guard (handle (.initialize "2025-06-18")).serverInfo.name = "lean-poly-mcp"
-#guard (handle (.initialize "1999-01-01")).protocolVersion = "1999-01-01"
-#guard (handle .listTools).map (·.name) = ["hello"]
+#guard (pureHandle (.initialize "2025-06-18")).serverInfo.name = "lean-poly-mcp"
+#guard (pureHandle (.initialize "1999-01-01")).protocolVersion = "1999-01-01"
+#guard (pureHandle .listTools).map (·.name) = ["hello"]
 
-#guard (handle (.callTool "hello" none)
+#guard (pureHandle (.callTool "hello" none)
         = ⟨[.text "Hello, world! (from the Lean 4 MCP server)"], false⟩)
 
-#guard (handle (.callTool "hello" (some (Json.mkObj [("name", Json.str "Robert")])))
+#guard (pureHandle (.callTool "hello" (some (Json.mkObj [("name", Json.str "Robert")])))
         = ⟨[.text "Hello, Robert! (from the Lean 4 MCP server)"], false⟩)
 
 /-! An unknown *tool* is a successful call reporting an error, not a protocol error —
 the request was well-formed. Contrast with an unknown *method* below. -/
-#guard (handle (.callTool "nope" none) = ⟨[.text "unknown tool: nope"], true⟩)
+#guard (pureHandle (.callTool "nope" none) = ⟨[.text "unknown tool: nope"], true⟩)
 
 /-! ## Decoding
 
@@ -52,6 +52,10 @@ private def decodesBadParams (method : String) (params : Option Json) : Bool :=
 private def decodesUnknown (method : String) (params : Option Json) : Bool :=
   match decodeRequest method params with | .unknownMethod => true | _ => false
 
+/-! The oracle summand decodes too — `source` is the one required field. -/
+#guard decodesOk "check" (some (Json.mkObj [("source", Json.str "theorem cand : True := trivial")]))
+#guard decodesBadParams "check" (some (Json.mkObj []))
+
 #guard decodesOk "tools/list" none
 #guard decodesOk "initialize" none                      -- protocolVersion defaults
 #guard decodesOk "tools/call" (some (Json.mkObj [("name", Json.str "hello")]))
@@ -66,9 +70,9 @@ private def decodesUnknown (method : String) (params : Option Json) : Bool :=
 so it is the one worth pinning.
 -/
 
-#guard (encodeResult .listTools (handle .listTools)).compress.startsWith "{\"tools\":["
+#guard (encodeResult (.inl .listTools) (pureHandle .listTools)).compress.startsWith "{\"tools\":["
 
-#guard ((encodeResult (.callTool "hello" none) (handle (.callTool "hello" none))).compress
+#guard ((encodeResult (.inl (.callTool "hello" none)) (pureHandle (.callTool "hello" none))).compress
         = "{\"content\":[{\"text\":\"Hello, world! (from the Lean 4 MCP server)\",\"type\":\"text\"}],\"isError\":false}")
 
 /-! ## Negative test
@@ -77,7 +81,7 @@ A handler that swaps two branches — answering `tools/list` with a call result 
 `tools/call` with the tool list — must not compile:
 
 ```lean
-def badHandle : (m : Method) → ResultOf m
+def badHandle : (m : PureMethod) → PureResultOf m
   | .initialize pv => ⟨pv, ⟨"lean-poly-mcp", "0.1.0"⟩⟩
   | .listTools => callHello none
   | .callTool _ _ => tools
@@ -93,13 +97,13 @@ error: Type mismatch
 has type
   CallToolResult
 but is expected to have type
-  ResultOf Method.listTools
+  PureResultOf PureMethod.listTools
 
 error: Type mismatch
   tools
 has type
   List Tool
 but is expected to have type
-  ResultOf (Method.callTool name✝ args✝)
+  PureResultOf (PureMethod.callTool name✝ args✝)
 ```
 -/

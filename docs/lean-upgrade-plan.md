@@ -217,11 +217,22 @@ Keep v1's evidence-carrying `ProofResult` (`Checked / Refuted / Unknown / ParseE
 its distinction between "this candidate failed" and "we ran out of attempts" is
 correct and unusually careful. Add `axioms : List Name` to `Checked`.
 
-**Performance:** a cold `import Mathlib` is tens of seconds. For interactive use, run
-[`leanprover-community/repl`](https://github.com/leanprover-community/repl) as a
-persistent side-process with a pickled Mathlib environment (`pickleTo`/`unpickleEnvFrom`),
-and reuse `env` ids across candidates. Budget real time for this; it is the difference
-between a demo that feels alive and one that doesn't.
+**Performance — resolved, and more cheaply than planned.** This section proposed running
+[`leanprover-community/repl`](https://github.com/leanprover-community/repl) as a side
+process with pickled environments. That turned out to be unnecessary. `Lean.Elab.process`
+takes an existing `Environment` and returns the new one plus the message log, so Mathlib
+is imported **once, in-process**, and every candidate reuses it:
+
+```
+[64588 ms] import Mathlib (ONCE, at startup)
+   [138 ms] first category-theory candidate
+    [17 ms] .. subsequent candidates
+     [4 ms] .. a rejected one
+```
+
+No subprocess, no IPC, no pickling, no external dependency. Startup cost is real and is
+paid once; `Mcp/Main.lean` takes the import set as an argument so `Init`-only runs start
+instantly for tests.
 
 ---
 

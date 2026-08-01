@@ -4,15 +4,19 @@ An MCP server whose interface **is** a polynomial functor, written in Lean 4, dr
 an agent that autoformalizes category theory — where Lean's kernel is the only thing
 ever trusted.
 
-> **Status: Phases 1–2 done.** The Poly kernel is proved and axiom-free; the MCP
-> server builds, runs, and answers real JSON-RPC over stdio. The oracle, the
-> autoformalization tools, the agent, Aristotle, and the front end are not written
-> yet. See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan
-> and [`v1-idris/`](v1-idris/) for the Idris2 predecessor this is derived from.
+> **Status: Phases 1–3 done.** The Poly kernel is proved and axiom-free; the MCP
+> server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
+> verifies candidates against Mathlib in milliseconds. The autoformalization
+> benchmark, tactics, the agent, Aristotle, and the front end are not written yet.
+> See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
+> [`v1-idris/`](v1-idris/) for the Idris2 predecessor this is derived from.
 
 ```sh
 lake build server
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./.lake/build/bin/server
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"check","params":{"source":"theorem cand : 2 + 2 = 4 := rfl"}}' \
+  | ./.lake/build/bin/server
+# → {"axioms":[],"outcome":"checked","source":"theorem cand : 2 + 2 = 4 := rfl"}
 ```
 
 ## The idea
@@ -84,6 +88,50 @@ client as a genuine value of a dependent-lens type — but is not wired into the
 transport. The elegant program and the running program are two different programs. In
 v2 they must be one: the server's live dispatch *is* the section, and the agent driving
 it *is* the lens.
+
+## The oracle
+
+The only trusted component. Three gates: elaborate, audit axioms, match the statement.
+Everything that *produces* proofs is untrusted.
+
+The audit is the part that matters. It is not a list of banned words — it is
+`Lean.collectAxioms` on the accepted term, rejecting anything outside
+`{propext, Classical.choice, Quot.sound}`. Measured behaviour, from
+[`test/OracleTest.lean`](test/OracleTest.lean):
+
+| attack | verdict |
+|---|---|
+| `by sorry` | `unsoundAxioms [sorryAx]` — note `sorry` is only a *warning* to the elaborator, so it sails through gate 1 |
+| `by native_decide` | `unsoundAxioms [cand._native.native_decide.ax_1]` |
+| a hand-rolled `axiom` | `unsoundAxioms [oops]` |
+| proves the **negation** of the request | `statementMismatch`, with the type mismatch verbatim |
+| `Classical.em` | `checked [propext, Classical.choice, Quot.sound]` — allowed, and disclosed |
+
+The `native_decide` row is the argument for auditing over blacklisting: on v4.33.0-rc1
+it mints a *per-declaration* axiom whose name varies with the declaration, so a
+name-based gate would have to know a name it cannot know in advance. The whitelist
+needs to know nothing. Nothing in `Oracle/Kernel.lean` mentions `native_decide`.
+
+The `statementMismatch` row is the failure v1 hit live: asked to prove something false,
+the model proved its negation — a true theorem, axiom-clean, and *not what was asked*.
+v1 could only disclose this in a prose paraphrase. Here it is caught.
+
+### Performance
+
+The oracle elaborates **in-process** via `Lean.Elab.process`, against an environment
+imported once at startup:
+
+```
+[64588 ms] import Mathlib (ONCE, at startup)
+   [138 ms] identity is a left unit for ≫          → checked [propext]
+    [17 ms] iso hom ≫ inv = id, statement matched  → checked [propext]
+    [24 ms] functors preserve retractions          → checked []
+     [4 ms] ATTACK: sorry in a Mathlib proof       → unsoundAxioms [sorryAx]
+```
+
+The plan anticipated needing `leanprover-community/repl` as a side process with pickled
+environments to make this tractable. It isn't necessary: reusing the `Environment`
+in-process gives millisecond candidates directly, with no subprocess and no IPC.
 
 ## Layout
 

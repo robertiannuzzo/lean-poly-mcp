@@ -134,26 +134,32 @@ def trace {S : Type u} {p : Poly.{u}} (agent : Agent S p) (server : Lens p y) :
 
 /-! ## Monoidal structures -/
 
-/-- Coproduct. The tool registry: adding a tool is taking a coproduct. -/
-def sum (p q : Poly.{u}) : Poly.{u} where
+/-- Coproduct. The tool registry: adding a tool is taking a coproduct.
+
+`@[reducible]`, and likewise the three below, so that `(p ⊕' q).Dir (.inl i)` reduces
+to `p.Dir i` during *instance search*, not merely during defeq checking. Without it a
+handler written against a coproduct interface cannot find a `ToJson` for its own
+response type — the type is right, but the elaborator will not unfold far enough to
+see it. -/
+@[reducible] def sum (p q : Poly.{u}) : Poly.{u} where
   Pos := p.Pos ⊕ q.Pos
   Dir
     | .inl i => p.Dir i
     | .inr j => q.Dir j
 
 /-- Product: choose a position in each, respond in *one* of them. -/
-def prod (p q : Poly.{u}) : Poly.{u} where
+@[reducible] def prod (p q : Poly.{u}) : Poly.{u} where
   Pos := p.Pos × q.Pos
   Dir := fun (i, j) => p.Dir i ⊕ q.Dir j
 
 /-- Dirichlet (parallel) product: run both, respond in both. -/
-def tensor (p q : Poly.{u}) : Poly.{u} where
+@[reducible] def tensor (p q : Poly.{u}) : Poly.{u} where
   Pos := p.Pos × q.Pos
   Dir := fun (i, j) => p.Dir i × q.Dir j
 
 /-- Composition `p ◁ q`: a request in `p`, and for each possible response a follow-up
 request in `q`. This is the two-step protocol. -/
-def compose (p q : Poly.{u}) : Poly.{u} where
+@[reducible] def compose (p q : Poly.{u}) : Poly.{u} where
   Pos := (i : p.Pos) × (p.Dir i → q.Pos)
   Dir := fun ⟨i, f⟩ => (d : p.Dir i) × q.Dir (f d)
 
