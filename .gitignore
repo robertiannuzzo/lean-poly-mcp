@@ -5,3 +5,8 @@ build/
 __pycache__/
 *.pyc
 .claude/settings.local.json
+
+# Lean
+.lake/
+*.olean
+*.ilean

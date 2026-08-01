@@ -1,0 +1,31 @@
+name = "lean-poly-mcp"
+version = "0.1.0"
+defaultTargets = ["Poly", "Mcp", "Oracle", "Formalize", "Agent"]
+
+# Pinned to master to match lean-toolchain (v4.33.0-rc1). Switch to a release tag
+# once the toolchain pin moves to a stable Lean.
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "master"
+
+[[lean_lib]]
+name = "Poly"
+
+[[lean_lib]]
+name = "Mcp"
+
+[[lean_lib]]
+name = "Oracle"
+
+[[lean_lib]]
+name = "Formalize"
+
+[[lean_lib]]
+name = "Agent"
+
+# The MCP server binary: JSON-RPC over stdio, the same interface v1-idris/ exposes.
+[[lean_exe]]
+name = "server"
+root = "Mcp.Main"
+supportInterpreter = true
