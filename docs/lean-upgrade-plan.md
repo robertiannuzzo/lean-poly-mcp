@@ -34,9 +34,11 @@ requirements 3, 4 and 7 come from, for free:
 
 | Poly concept | What it is in this system |
 |---|---|
-| a **lens `y → p`** | **one tool call** — literally a pair `(request, response)`, i.e. an *element* of `p` |
 | a **lens `p → y`** | **the server** — a section, `(i : p.Pos) → p.Dir i`; handles every request |
+| a **lens `y → p`** | **a request**, only — the backward map lands in `1`, so no response rides along |
+| the pair type `Σ (i : p.Pos), p.Dir i` | **one completed tool call** — request plus its response; *not* a hom-set |
 | a **lens `S y^S → p`** | **the agent** — a Moore machine; state, a request per state, a state update per response |
+| the **composite `S y^S → p → y`** | **one round-trip**, which is precisely a state transition `S → S` |
 | **coproduct `Σ_t p_t`** | **the tool registry** — adding a tool is taking a coproduct |
 | **composition `p ◁ q`** | **a two-step protocol** — "call this, then depending on what came back, call that" |
 | **cofree comonoid `𝒞_p`** | **the space of all sessions**; one agent run is a path through it |
@@ -51,11 +53,17 @@ Two facts worth stating because they are one-liners in Lean and they make the
 mapping above a theorem rather than an analogy:
 
 ```lean
-Lens y p  ≃  (i : p.Pos) × p.Dir i          -- elements of p are completed tool calls
-Lens p y  ≃  ((i : p.Pos) → p.Dir i)        -- sections of p are servers
+Lens p y        ≃  ((i : p.Pos) → p.Dir i)   -- sections are servers
+Lens (S y^S) y  ≃  (S → S)                   -- so agent ∘ server is a state transition
 ```
 
-Prove both. They are cheap, they are real, and they are what licenses the whole table.
+**Done** — both are proved in `Poly/Basic.lean` (`sectionEquiv`, `step`, `step_eq`),
+axiom-free, as is `posEquiv : Lens y p ≃ p.Pos`. That third one is the correction to an
+earlier draft of this plan, which claimed `Lens y p ≃ Σ i, p.Dir i`. It does not: the
+backward map of a lens out of `y` lands in `y.Dir = 1` and carries no response. The
+"completed tool call" type is `Σ (i : p.Pos), p.Dir i`, which is not a hom-set. Worth
+recording the slip rather than quietly fixing it, since the whole point of §11 is that
+this project distinguishes what is checked from what merely sounds right.
 
 ### What Lean buys us that Idris could not
 

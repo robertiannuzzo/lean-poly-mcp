@@ -24,9 +24,11 @@ structure rather than being designed separately:
 
 | Poly | Here |
 |---|---|
-| lens `y → p` | **one tool call** — literally an *element* of `p`, a `(request, response)` pair |
 | lens `p → y` | the **server** — a section, `(i : p.Pos) → p.Dir i` |
+| lens `y → p` | a **request**, and nothing more (see the caveat below) |
 | lens `S y^S → p` | the **agent** — a Moore machine |
+| the composite `S y^S → p → y` | **one round-trip**, which is exactly a state transition `S → S` |
+| `Σ (i : p.Pos), p.Dir i` | a **completed tool call** — request plus its response |
 | coproduct `Σ_t p_t` | the **tool registry** |
 | composition `p ◁ q` | a **two-step protocol** |
 | cofree comonoid `𝒞_p` | the space of **all sessions**; one run is a path through it |
@@ -35,12 +37,20 @@ structure rather than being designed separately:
 The last row is why tactic-level proof search and agentic tool use are the same
 construction here, seen at two altitudes.
 
-Two facts license the table, and both are short Lean proofs rather than analogies:
+Two facts license the table, and both are machine-checked in
+[`Poly/Basic.lean`](Poly/Basic.lean) — `sectionEquiv` and `step`/`step_eq`:
 
 ```lean
-Lens y p  ≃  (i : p.Pos) × p.Dir i          -- elements of p are completed tool calls
-Lens p y  ≃  ((i : p.Pos) → p.Dir i)        -- sections of p are servers
+Lens p y        ≃  ((i : p.Pos) → p.Dir i)   -- sections are servers
+Lens (S y^S) y  ≃  (S → S)                   -- so agent ∘ server is a state transition
 ```
+
+**A caveat worth stating precisely,** since it is easy to get backwards and an earlier
+draft of this README did: a lens `y → p` is *not* a completed tool call. Its backward
+map lands in `y.Dir = 1`, so it carries no response; `Lens y p ≃ p.Pos` picks out a
+request only. A completed call is an element of `Σ (i : p.Pos), p.Dir i`, which is not
+a hom-set of `Poly` at all. Both statements are proved as `sectionEquiv` and `posEquiv`
+so the distinction is enforced rather than remembered.
 
 ## Why Lean, and not Idris2
 
