@@ -21,8 +21,8 @@ structure Case where
   preamble : String := ""
   decl : Name := `cand
   expected : Option String := none
-  /-- What the oracle is supposed to say. -/
-  want : String
+  /-- Prefix that `describe` must produce. Checked, not eyeballed. -/
+  expect : String
 
 def describe : Outcome → String
   | .checked axs =>
@@ -37,16 +37,16 @@ def describe : Outcome → String
 def cases : List Case :=
   [ { name := "honest proof"
       source := "theorem cand : ∀ n : Nat, n + 0 = n := fun _ => rfl"
-      want := "checked, no axioms" }
+      expect := "checked (no axioms)" }
 
   , { name := "honest proof, statement matches"
       source := "theorem cand : ∀ n : Nat, n + 0 = n := fun _ => rfl"
       expected := some "∀ n : Nat, n + 0 = n"
-      want := "checked" }
+      expect := "checked (no axioms)" }
 
   , { name := "ATTACK: sorry"
       source := "theorem cand : ∀ n : Nat, n = n + 1 := by sorry"
-      want := "unsoundAxioms [sorryAx] — note `sorry` is only a WARNING to the elaborator" }
+      expect := "unsoundAxioms: [sorryAx]" }
 
   , { name := "ATTACK: native_decide"
       source := "theorem cand : (List.range 10).length = 10 := by native_decide"
@@ -55,38 +55,47 @@ def cases : List Case :=
       -- might expect. Which is precisely the argument for auditing rather than
       -- blacklisting: a name-based gate would have to know that name in advance, and
       -- it varies with the declaration. The whitelist needs to know nothing.
-      want := "unsoundAxioms [a generated native_decide axiom] — not named anywhere in Kernel.lean" }
+      expect := "unsoundAxioms: " }
 
   , { name := "ATTACK: home-made axiom"
       source := "axiom oops : ∀ n : Nat, n = n + 1\ntheorem cand : ∀ n : Nat, n = n + 1 := oops"
-      want := "unsoundAxioms [oops]" }
+      expect := "unsoundAxioms: [oops]" }
 
   , { name := "ATTACK: proves the NEGATION of what was asked (v1's live failure)"
       source := "theorem cand : ∀ n : Nat, n = n + 1 → False := by omega"
       expected := some "∀ n : Nat, n = n + 1"
-      want := "statementMismatch — elaborates and is axiom-clean, but is not the goal" }
+      expect := "statementMismatch: " }
 
   , { name := "does not elaborate"
       source := "theorem cand : ∀ n : Nat, n + 0 = n := fun _ => Nat.zero"
-      want := "elabFailed" }
+      expect := "elabFailed: " }
 
   , { name := "elaborates, but defines the wrong name"
       source := "theorem somethingElse : True := trivial"
-      want := "missingDecl cand" }
+      expect := "missingDecl: cand" }
 
   , { name := "whitelisted classical reasoning is fine"
       source := "theorem cand : ∀ p : Prop, p ∨ ¬p := fun p => Classical.em p"
-      want := "checked, with Classical.choice + propext in the axiom set" }
+      expect := "checked (axioms: [propext, Classical.choice, Quot.sound])" }
   ]
 
-def main : IO Unit := do
-  IO.println "building base environment (Init only)..."
+def main : IO UInt32 := do
   let env ← mkBaseEnv #[`Init]
-  IO.println ""
+  let mut failed := 0
   for c in cases do
     let outcome ← verify env
       { preamble := c.preamble, source := c.source, declName := c.decl, expected? := c.expected }
-    IO.println s!"── {c.name}"
-    IO.println s!"   want: {c.want}"
-    IO.println s!"   got:  {describe outcome}"
-    IO.println ""
+    let got := describe outcome
+    if got.startsWith c.expect then
+      IO.println s!"  ok    {c.name}"
+    else
+      failed := failed + 1
+      IO.println s!"  FAIL  {c.name}"
+      IO.println s!"        expected prefix: {c.expect}"
+      IO.println s!"        got:             {got}"
+  if failed == 0 then
+    IO.println s!"  {cases.length} oracle cases passed"
+    return 0
+  else
+    IO.println s!"  {failed} of {cases.length} oracle cases FAILED"
+    return 1
