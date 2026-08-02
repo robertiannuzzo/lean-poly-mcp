@@ -89,7 +89,7 @@ def submit (projectDir : String) (prompt : String) (replay : Option String := no
     IO (Except String Job) := do
   if let some cached ← readReplay replay "submit.txt" then
     return parseProjectId cached
-  match ← runCli [prompt, "--project-dir", projectDir] with
+  match ← runCli ["submit", prompt, "--project-dir", projectDir] with
   | .error e => return .error e
   | .ok out => return parseProjectId out
 where
@@ -112,12 +112,11 @@ Replay reads `formalize.txt`; tests and demos therefore exercise the parsing pat
 touching the network. The CLI output observed/documented for `formalize` is intentionally
 treated as text, not trusted structure: comments and Markdown fences are stripped, then
 the remaining Lean statement is handed to our own elaborator by callers. -/
-def formalize (prompt : String) (imports : List String := ["Mathlib"])
+def formalize (inputFile : String) (_imports : List String := ["Mathlib"])
     (replay : Option String := none) : IO (Except String Formalization) := do
   if let some cached ← readReplay replay "formalize.txt" then
     return parseFormalize cached
-  let importArgs := imports.foldr (fun i acc => "--import" :: i :: acc) []
-  let args := ["formalize", prompt] ++ importArgs
+  let args := ["formalize", inputFile]
   match ← runCli args with
   | .error e => return .error e
   | .ok out => return parseFormalize out

@@ -209,7 +209,7 @@ class AristotleJobs:
             "Use Lean 4 and Mathlib only."
         )
         out = subprocess.run(
-            ["aristotle", prompt, "--project-dir", str(job_dir)],
+            ["aristotle", "submit", prompt, "--project-dir", str(job_dir)],
             cwd=ROOT,
             capture_output=True,
             text=True,
