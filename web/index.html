@@ -158,6 +158,12 @@
     color: var(--ink);
     font: 12.5px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
   }
+  .summary-box {
+    min-height: 150px;
+    max-height: 560px;
+    font: 14px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    white-space: pre-wrap;
+  }
   .meta {
     color: var(--muted);
     font-size: 12.5px;
@@ -356,7 +362,7 @@ async function pollAristotle(options = {}) {
   setAristotleStatus(response.status, isTerminalStatus(response.status) ? "" : " · polling every 15s");
   if (response.proof) {
     $("aristotleResult").innerHTML = `
-      ${response.summary ? `<div class="label" style="margin-top:14px">Aristotle summary</div><pre>${esc(response.summary)}</pre>` : ""}
+      ${response.summary ? `<div class="label" style="margin-top:14px">Aristotle summary</div><pre class="summary-box">${esc(response.summary)}</pre>` : ""}
       <div class="label" style="margin-top:14px">Aristotle output (not locally trusted until reverified)</div>
       <pre>${esc(response.proof)}</pre>
       <div class="meta">downloaded from ${esc(response.proofPath || "archive")}</div>
@@ -368,7 +374,7 @@ async function pollAristotle(options = {}) {
     `;
   } else if (response.downloaded) {
     $("aristotleResult").innerHTML = `
-      ${response.summary ? `<div class="label" style="margin-top:14px">Aristotle summary</div><pre>${esc(response.summary)}</pre>` : ""}
+      ${response.summary ? `<div class="label" style="margin-top:14px">Aristotle summary</div><pre class="summary-box">${esc(response.summary)}</pre>` : ""}
       <div class="label" style="margin-top:14px">Downloaded artifact</div>
       <pre>${esc((response.downloadFiles || []).join("\n") || "No files listed in downloaded artifact.")}</pre>
       <div class="meta">No Lean proof file matching the expected theorem shape was found.</div>
