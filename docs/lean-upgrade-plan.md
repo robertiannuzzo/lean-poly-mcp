@@ -1,6 +1,6 @@
 # lean-poly-mcp — design and plan
 
-**Status: Phases 1–4, 6 and 7 built and machine-checked. Agent, Aristotle and front end planned.**
+**Status: Phases 1–4 and 6–8 built and machine-checked. Aristotle and front end planned.**
 Revised 2026-08-01 for the Aristotle-only architecture. Supersedes the original
 `idris-mcp` upgrade plan.
 
@@ -364,11 +364,37 @@ that closes the goal, and otherwise hand back the un-introduced `∀`.
 
 ---
 
-## 9. Phases 8–9 — the agent, and the front end
+## 9. Phase 8 — the agent ✅ **done** · Phase 9 — the front end
 
 The agent is `Lens (S y^S) MCP`, defined in Lean, executing the escalation ladder from §2.
 Every step is a node in the session tree — a path in `𝒞_MCP` — which is the front end's
 data model, so the front end is not decoration either.
+
+**Done.** `Agent.prover` is an ordinary value of the kernel's `Lens` type, and
+`Agent.run` pumps it via `Poly.stepIO` — the Kleisli analogue of `Poly.step`, with
+`stepIO_pure` proving the two agree definitionally whenever the server is pure. The
+runtime executes *that value*; there is no second implementation to drift. `test/AgentTest.lean`
+asserts the type, so replacing `prover` with a hand-rolled loop stops compiling.
+
+Two things the formalism forced, both worth stating rather than hiding:
+
+- **Termination is a fixed point, not a state.** A lens `S y^S → p` has no notion of
+  stopping — `onPos` must produce a request for *every* state. Terminal phases therefore
+  emit a harmless `tools/list` and ignore the answer. A Moore machine runs forever, and
+  "halting" is a state that no longer changes; the stopping rule lives in the runner, not
+  in the lens.
+- **A `verify` entry point exists before Aristotle does.** A proof arriving from outside
+  goes through the same oracle as everything else, so the path is built and tested now —
+  Phase 5 only has to supply the candidate.
+
+Measured, four runs, both entry points and both endings each:
+
+```
+ladder solves it                       [177 ms]  SOLVED via tier 0 `simp` ([Quot.sound, propext])
+ladder exhausts — Phase 5 escalates   [7482 ms]  NEEDS PROVER — exhausted after 9 tactics
+supplied candidate survives             [57 ms]  SOLVED via supplied candidate
+supplied candidate is rejected (sorry)  [17 ms]  REJECTED — axioms outside whitelist: [sorryAx]
+```
 
 Four panels, one self-contained page (no build step, no CDN — reviewable, and shareable
 as an artifact):

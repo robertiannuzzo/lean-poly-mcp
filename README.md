@@ -4,11 +4,11 @@ An MCP server whose interface **is** a polynomial functor, written in Lean 4, dr
 an agent that autoformalizes category theory — where Lean's kernel is the only thing
 ever trusted.
 
-> **Status: Phases 1–4, 6, 7 done.** The Poly kernel is proved and axiom-free; the MCP
+> **Status: Phases 1–4, 6–8 done.** The Poly kernel is proved and axiom-free; the MCP
 > server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
 > verifies candidates against Mathlib in milliseconds; the graded benchmark and the
-> free tiers of the escalation ladder run locally. The agent, Aristotle, and the front
-> end are not written yet.
+> free tiers of the escalation ladder run locally; the agent runs as a lens against the
+> live server. Aristotle and the front end are not written yet.
 > **Aristotle is the only external service** — there is no LLM and no
 > `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
 > See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
@@ -138,6 +138,32 @@ That bounds what a paid prover is actually for. Two caveats matter more than the
 `exact?` "solving" a tier-2 goal often means it *found* a lemma we already proved, so the
 corpus marks genuinely-absent statements `[novel]`; and the one informative miss —
 `a trace of n steps has n entries` — needs **induction**, which no discharge tactic does.
+
+## The agent is a lens
+
+`Agent.prover : Lens (State y^State) MCP` — an ordinary value of the kernel's lens type.
+`Agent.run` pumps it with `Poly.stepIO`, the Kleisli analogue of `Poly.step`; `stepIO_pure`
+proves the two agree definitionally when the server is pure. **The runtime executes that
+value**, so there is no second implementation to drift out of sync — which was v1's
+structural flaw.
+
+```
+── ladder solves it                      [177 ms, 2 states]
+     search — trying the free ladder
+     SOLVED via tier 0 `simp` ([Quot.sound, propext])
+
+── ladder exhausts (Phase 5 escalates)  [7482 ms, 2 states]
+     search — trying the free ladder
+     NEEDS PROVER — free ladder exhausted after 9 tactics
+
+── supplied candidate is rejected         [17 ms, 2 states]
+     verify — checking a supplied candidate
+     REJECTED — axioms outside the whitelist: [sorryAx]
+```
+
+Termination is a **fixed point**, not a state: a lens has no notion of stopping, so
+`onPos` must answer for every state and terminal phases emit a harmless `tools/list` they
+ignore. A Moore machine runs forever; halting is a state that stops changing.
 
 ## The oracle
 

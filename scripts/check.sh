@@ -24,6 +24,8 @@ if [ "${1:-}" = "--full" ]; then
   if lake env lean --run test/MathlibOracleTest.lean; then :; else fail=1; fi
   echo "--- benchmark: how far the free ladder gets (~70s) ---"
   if lake env lean --run test/BenchmarkTest.lean; then :; else fail=1; fi
+  echo "--- agent runs (~50s) ---"
+  if lake env lean --run test/AgentTest.lean; then :; else fail=1; fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

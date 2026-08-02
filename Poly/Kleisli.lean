@@ -40,4 +40,32 @@ its effectful image returns the same responses. -/
 theorem toIO_pure {p : Poly.{0}} (s : Section p) (i : p.Pos) :
     Section.toIO s i = pure (s i) := rfl
 
+/-! ## Running an agent against an effectful server
+
+`Poly.step` composes an agent with a `Lens p y` and lands in `S → S`. Against an
+effectful server the same composition lands in `S → IO S` — the Kleisli analogue, and
+the shape a real run actually has. -/
+
+/-- One round-trip against an effectful server: ask, await, update. Compare `Poly.step`,
+which is this with the `IO` removed. -/
+def stepIO {S : Type} {p : Poly.{0}} (agent : Agent S p) (server : IOSection p) (s : S) :
+    IO S := do
+  return agent.onDir s (← server (agent.onPos s))
+
+/-- **The effectful run agrees with the pure one whenever the server is pure.** So
+`Poly.step` is not superseded by `stepIO`; it is the special case, and the Phase 1
+statement keeps its meaning on the fragment where it applies. -/
+theorem stepIO_pure {S : Type} {p : Poly.{0}} (agent : Agent S p) (server : Lens p y)
+    (s : S) :
+    stepIO agent (Lens.toIOSection server) s = pure (step agent server s) := rfl
+
+/-- Run for `n` steps, recording every state visited — a path through the interaction
+tree, and the data a front end draws. -/
+def traceIO {S : Type} {p : Poly.{0}} (agent : Agent S p) (server : IOSection p) :
+    Nat → S → IO (List S)
+  | 0, _ => pure []
+  | n + 1, s => do
+    let s' ← stepIO agent server s
+    return s :: (← traceIO agent server n s')
+
 end Poly
