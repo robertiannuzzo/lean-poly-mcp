@@ -4,11 +4,12 @@ An MCP server whose interface **is** a polynomial functor, written in Lean 4, dr
 an agent that autoformalizes category theory — where Lean's kernel is the only thing
 ever trusted.
 
-> **Status: Phases 1–4, 6–8 done.** The Poly kernel is proved and axiom-free; the MCP
+> **Status: Phases 1–8 done.** The Poly kernel is proved and axiom-free; the MCP
 > server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
 > verifies candidates against Mathlib in milliseconds; the graded benchmark and the
 > free tiers of the escalation ladder run locally; the agent runs as a lens against the
-> live server. Aristotle and the front end are not written yet.
+> live server; Aristotle is wired and has completed one live round trip. The front end
+> is not written yet.
 > **Aristotle is the only external service** — there is no LLM and no
 > `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
 > See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
@@ -138,6 +139,41 @@ That bounds what a paid prover is actually for. Two caveats matter more than the
 `exact?` "solving" a tier-2 goal often means it *found* a lemma we already proved, so the
 corpus marks genuinely-absent statements `[novel]`; and the one informative miss —
 `a trace of n steps has n entries` — needs **induction**, which no discharge tactic does.
+
+## Aristotle, and what we do with what it returns
+
+Tier 2 is the only component that leaves the machine. It is job-based (submissions return
+a handle, never a proof), and **everything it returns goes through our oracle before it is
+called anything**.
+
+One live round trip, 2026-08-01, on the single benchmark goal the free ladder could not
+reach — it needs induction:
+
+```
+submit   → project 385577ec-…      (non-blocking)
+status   → COMPLETE after ~3 min
+download → the sorry, filled:
+
+  induction n generalizing s with
+  | zero => rfl
+  | succ n ih =>
+    simp only [trace, List.length_cons]
+    exact congrArg Nat.succ (ih (step agent server s))
+```
+
+Our verdict, not theirs:
+
+```
+Poly/Basic.lean:   UNCHANGED       (it did not edit the kernel to suit the proof)
+VERDICT:           checked
+axioms:            none
+statement matched: α-equivalent to the goal submitted
+```
+
+A theorem about **our own kernel**, proved externally and verified locally — which is
+exactly what pinning to Aristotle's toolchain buys. `test/AristotleTest.lean` replays the
+recorded run offline, but re-runs the *real* oracle, so it still fails if the proof stops
+checking or starts depending on an axiom.
 
 ## The agent is a lens
 

@@ -19,6 +19,10 @@ done
 # Self-checking suite: exits non-zero and reports which case broke.
 if lake env lean --run test/OracleTest.lean; then :; else fail=1; fi
 
+# Offline by construction: replays recorded Aristotle output, but re-runs the real
+# oracle. Never touches the network, so it belongs in the fast path.
+if lake env lean --run test/AristotleTest.lean; then :; else fail=1; fi
+
 if [ "${1:-}" = "--full" ]; then
   echo "--- Mathlib suite (~70s) ---"
   if lake env lean --run test/MathlibOracleTest.lean; then :; else fail=1; fi

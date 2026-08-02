@@ -1,0 +1,3 @@
+ID                                   CREATED              NAME                           STATUS         
+---------------------------------------------------------------------------------------------------------
+ae0069cf-933b-4a2b-95c4-5fe63916ee6c 3 mins ago           Prove the theorem 'cand' in... COMPLETE

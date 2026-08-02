@@ -1,6 +1,6 @@
 # lean-poly-mcp — design and plan
 
-**Status: Phases 1–4 and 6–8 built and machine-checked. Aristotle and front end planned.**
+**Status: Phases 1–8 built and machine-checked, with one live Aristotle round trip. Front end planned.**
 Revised 2026-08-01 for the Aristotle-only architecture. Supersedes the original
 `idris-mcp` upgrade plan.
 
@@ -281,7 +281,7 @@ the tools that exist, rather than a summand whose only possible response is an e
 
 ---
 
-## 6. Phase 5 — Aristotle
+## 6. Phase 5 — Aristotle ✅ **done**
 
 Client via the `aristotle` CLI shelled out from Lean (`IO.Process`), so the vendor SDK is
 the only non-Lean dependency. `ARISTOTLE_API_KEY`.
@@ -298,9 +298,51 @@ ever labelled `checked`. The vendor's assertion of verification is an input, not
 `Poly/Basic.lean` — so it can prove theorems *about our own kernel*, which is what makes
 Tier 2 below real rather than aspirational.
 
-**Mandatory in code, not by convention:** hard attempt cap; `--replay` mode backed by
-cached job outputs so demos and tests never hit the network; no retry-on-timeout without
-a ceiling.
+**Replay, not caps.** The owner has declined a spend cap (the account caps itself), so
+`Aristotle/` has none. What it does have is `--replay`: fixtures in
+`test/fixtures/aristotle/` let the suite exercise the whole path offline, which is a
+determinism and speed property rather than a budget one. The agent's `fuel` remains, but
+that prevents non-termination, not spending.
+
+### The live round trip
+
+Run on 2026-08-01 against goal `(trace agent server n s).length = n` — deliberately the
+one benchmark entry the free ladder could not reach, because it needs induction and no
+discharge tactic does induction.
+
+```
+submit   → project 385577ec-…  (non-blocking, returns a job handle)
+status   → COMPLETE after ~3 minutes
+download → AristotleGoal.lean, filled
+```
+
+What came back:
+
+```lean
+  induction n generalizing s with
+  | zero => rfl
+  | succ n ih =>
+    simp only [trace, List.length_cons]
+    exact congrArg Nat.succ (ih (step agent server s))
+```
+
+Then the part that matters — **our** verdict, not theirs:
+
+```
+Poly/Basic.lean:   UNCHANGED       (it did not edit the kernel to make the proof work)
+VERDICT:           checked
+axioms:            none
+statement matched: α-equivalent to the goal submitted
+```
+
+Two things this establishes that the design predicted. A theorem about **our own kernel**
+was proved by an external system and verified by ours, which is what the toolchain pin
+buys. And `sorryAx` absent is literally "Aristotle honoured its contract" — the soundness
+gate and the completion check really are the same check.
+
+**One bug the live run caught:** the CLI reports `COMPLETE`, not `COMPLETED`. I had
+guessed the plural. Anything unrecognised is now reported as `unrecognised` rather than
+assumed to be a failure or a success.
 
 ---
 

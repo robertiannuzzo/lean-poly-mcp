@@ -1,6 +1,6 @@
 name = "lean-poly-mcp"
 version = "0.1.0"
-defaultTargets = ["Poly", "Tactics", "Mcp", "Oracle", "Formalize", "Agent", "server"]
+defaultTargets = ["Poly", "Tactics", "Mcp", "Oracle", "Formalize", "Aristotle", "Agent", "server"]
 
 # Pinned to Aristotle's exact Mathlib: commit 8f9d9cff is the tag v4.28.0, and is
 # literally the commit titled "chore: bump toolchain to v4.28.0".
@@ -29,6 +29,9 @@ name = "Oracle"
 
 [[lean_lib]]
 name = "Formalize"
+
+[[lean_lib]]
+name = "Aristotle"
 
 [[lean_lib]]
 name = "Agent"
