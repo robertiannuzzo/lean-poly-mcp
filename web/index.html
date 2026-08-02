@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mathlib Statement Miner</title>
+<title>Category Theory Statement Miner</title>
 <style>
   :root {
     --bg: #f7f7f4;
@@ -56,6 +56,11 @@
     font-size: 22px;
     line-height: 1.2;
     font-weight: 720;
+  }
+  .subtitle {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
   }
   button {
     border: 0;
@@ -191,7 +196,10 @@
 <body>
 <main>
   <header>
-    <h1>Mathlib Statement Miner</h1>
+    <div>
+      <h1>Category Theory Statement Miner</h1>
+      <div class="subtitle">Mining real <code>Mathlib.CategoryTheory</code> theorems and screening them for Aristotle.</div>
+    </div>
     <div class="actions" style="margin-top:0">
       <button id="mine">Mine statement</button>
       <button id="findCandidate" class="secondary">Find Aristotle candidate</button>
