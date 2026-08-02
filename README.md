@@ -4,12 +4,12 @@ An MCP server whose interface **is** a polynomial functor, written in Lean 4, dr
 an agent that autoformalizes category theory — where Lean's kernel is the only thing
 ever trusted.
 
-> **Status: Phases 1–8 done.** The Poly kernel is proved and axiom-free; the MCP
+> **Status: all phases done.** The Poly kernel is proved and axiom-free; the MCP
 > server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
 > verifies candidates against Mathlib in milliseconds; the graded benchmark and the
 > free tiers of the escalation ladder run locally; the agent runs as a lens against the
-> live server; Aristotle is wired and has completed one live round trip. The front end
-> is not written yet.
+> live server; Aristotle is wired and has completed one live round trip; the front end
+> renders all of it.
 > **Aristotle is the only external service** — there is no LLM and no
 > `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
 > See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
@@ -139,6 +139,26 @@ That bounds what a paid prover is actually for. Two caveats matter more than the
 `exact?` "solving" a tier-2 goal often means it *found* a lemma we already proved, so the
 corpus marks genuinely-absent statements `[novel]`; and the one informative miss —
 `a trace of n steps has n entries` — needs **induction**, which no discharge tactic does.
+
+## The front end
+
+```sh
+lake build server agent-run
+python3 web/serve.py            # Poly kernel only — ready in ~1s
+python3 web/serve.py Mathlib    # category theory — ~55s startup, then ms per candidate
+```
+
+Four panels at `localhost:8770`, all on live data. The first is the one worth pointing
+at: **MCP already names both halves of a polynomial.** `inputSchema` is the position,
+`outputSchema` the direction, so `tools/list` advertises
+
+```
+MCP = hello·y^String + check·y^Oracle.Outcome + search·y^Tactics.Outcome
+```
+
+with no extension to the protocol — the page reads the interface's structure off the
+wire rather than being told it. The others draw the agent's session as a path, the axiom
+audit behind each verdict, and Aristotle's claim beside our own.
 
 ## Aristotle, and what we do with what it returns
 

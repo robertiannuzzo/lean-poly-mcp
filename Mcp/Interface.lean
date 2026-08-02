@@ -130,7 +130,8 @@ def toolInfo : ToolId → Tool
         , ("properties", Json.mkObj
             [ ("name", Json.mkObj
                 [ ("type", Json.str "string")
-                , ("description", Json.str "Name to greet") ]) ]) ] }
+                , ("description", Json.str "Name to greet") ]) ]) ]
+      outputSchema := some (Json.mkObj [("type", Json.str "string")]) }
   | .check =>
     { name := toolName .check
       description :=
@@ -149,7 +150,16 @@ def toolInfo : ToolId → Tool
             , ("preamble", Json.mkObj
                 [ ("type", Json.str "string")
                 , ("description", Json.str "Optional. Lines prepended to both the candidate and the statement probes, typically `open` commands.") ]) ])
-        , ("required", toJson [ "source" ]) ] }
+        , ("required", toJson [ "source" ]) ]
+      outputSchema := some (Json.mkObj
+        [ ("type", Json.str "object")
+        , ("description", Json.str "Oracle.Outcome — evidence, never a bare boolean.")
+        , ("properties", Json.mkObj
+            [ ("outcome", Json.mkObj
+                [ ("enum", toJson [ "checked", "elab_failed", "missing_decl",
+                                    "unsound_axioms", "statement_mismatch", "bad_statement" ]) ])
+            , ("axioms", Json.mkObj [("type", Json.str "array")])
+            , ("diagnostic", Json.mkObj [("type", Json.str "string")]) ]) ]) }
   | .search =>
     { name := toolName .search
       description :=
@@ -169,7 +179,16 @@ def toolInfo : ToolId → Tool
             , ("maxTier", Json.mkObj
                 [ ("type", Json.str "integer")
                 , ("description", Json.str "Optional, default 1. 0 = fast discharge tactics only; 1 = also library search.") ]) ])
-        , ("required", toJson [ "goal" ]) ] }
+        , ("required", toJson [ "goal" ]) ]
+      outputSchema := some (Json.mkObj
+        [ ("type", Json.str "object")
+        , ("description", Json.str "Tactics.Outcome — which rung solved it, or what was tried.")
+        , ("properties", Json.mkObj
+            [ ("outcome", Json.mkObj [("enum", toJson [ "solved", "unsolved" ])])
+            , ("tier", Json.mkObj [("type", Json.str "integer")])
+            , ("tactic", Json.mkObj [("type", Json.str "string")])
+            , ("axioms", Json.mkObj [("type", Json.str "array")])
+            , ("tried", Json.mkObj [("type", Json.str "array")]) ]) ]) }
 
 def tools : List Tool := allTools.map toolInfo
 

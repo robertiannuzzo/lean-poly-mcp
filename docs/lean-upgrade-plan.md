@@ -1,6 +1,6 @@
 # lean-poly-mcp — design and plan
 
-**Status: Phases 1–8 built and machine-checked, with one live Aristotle round trip. Front end planned.**
+**Status: all phases built and machine-checked, with one live Aristotle round trip.**
 Revised 2026-08-01 for the Aristotle-only architecture. Supersedes the original
 `idris-mcp` upgrade plan.
 
@@ -406,7 +406,7 @@ that closes the goal, and otherwise hand back the un-introduced `∀`.
 
 ---
 
-## 9. Phase 8 — the agent ✅ **done** · Phase 9 — the front end
+## 9. Phase 8 — the agent ✅ **done** · Phase 9 — the front end ✅ **done**
 
 The agent is `Lens (S y^S) MCP`, defined in Lean, executing the escalation ladder from §2.
 Every step is a node in the session tree — a path in `𝒞_MCP` — which is the front end's
@@ -442,7 +442,11 @@ Four panels, one self-contained page (no build step, no CDN — reviewable, and 
 as an artifact):
 
 1. **Polynomial explorer** — positions and directions of the live server; adding tools
-   visibly changes the coproduct.
+   visibly changes the coproduct. **Nothing on this panel is hardcoded**: MCP already
+   names both halves, `inputSchema` is the position and `outputSchema` the direction, so
+   `tools/list` advertises `Σ_t inputSchema_t → outputSchema_t` with no extension to the
+   protocol. Populating `outputSchema` was the only change the front end required of the
+   server.
 2. **Session tree** — the run as a path through `𝒞_p`, with abandoned tier-0/1 branches
    greyed. The picture that makes the categorical story legible without reading Lean.
 3. **Proof panel** — statement, term, **axiom set**, match result, and which tier solved

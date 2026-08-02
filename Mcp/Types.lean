@@ -36,12 +36,31 @@ instance : ToJson InitializeResult where
     , ("capabilities", Json.mkObj [("tools", Json.mkObj [])])
     , ("serverInfo", toJson r.serverInfo) ]
 
-/-- A tool's advertised shape. `inputSchema` is an opaque JSON Schema object. -/
+/-- A tool's advertised shape.
+
+MCP turns out to name the two halves of a polynomial directly: `inputSchema` is the
+**position** — what a request to this tool carries — and `outputSchema` is the
+**direction**, the response that request admits. So `tools/list` advertises
+`Σ_t inputSchema_t → outputSchema_t` without any extension to the protocol, and a client
+can read the interface's structure off the wire.
+
+`outputSchema` is optional in MCP, so it is omitted rather than emitted as `null` when
+absent — a hand-written encoder, because `deriving ToJson` would emit the null. -/
 structure Tool where
   name : String
   description : String
   inputSchema : Json
-  deriving ToJson
+  outputSchema : Option Json := none
+
+instance : ToJson Tool where
+  toJson t :=
+    let base : List (String × Json) :=
+      [ ("name", Json.str t.name)
+      , ("description", Json.str t.description)
+      , ("inputSchema", t.inputSchema) ]
+    Json.mkObj (match t.outputSchema with
+      | none => base
+      | some o => base ++ [("outputSchema", o)])
 
 /-- Tool-call output. Only text content is needed so far. -/
 inductive Content where
