@@ -116,6 +116,15 @@
   .badge.miss {
     color: var(--miss);
   }
+  .badge.good {
+    color: var(--ok);
+  }
+  .badge.maybe {
+    color: #9a6a14;
+  }
+  .badge.skip {
+    color: var(--miss);
+  }
   .grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -153,6 +162,24 @@
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     white-space: pre-wrap;
   }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+  }
+  .secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--line);
+  }
+  ul.reasons {
+    margin: 8px 0 0;
+    padding-left: 20px;
+    color: var(--muted);
+    font-size: 13px;
+  }
   @media (max-width: 720px) {
     header { align-items: stretch; flex-direction: column; }
     button { width: 100%; }
@@ -176,6 +203,8 @@
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+let currentEntry = null;
+let currentProjectId = null;
 
 function render(data) {
   if (data.error) {
@@ -185,11 +214,15 @@ function render(data) {
 
   const entry = data.entry;
   const verdict = entry.verdict || {};
+  const quality = entry.quality || { label: "skip", score: 0, reasons: [] };
   const solved = verdict.outcome === "solved";
   const miss = verdict.outcome === "interesting_miss";
   const tried = verdict.tried || [];
   const axioms = verdict.axioms || [];
   const badge = solved ? "solved locally" : miss ? "interesting miss" : verdict.outcome || "unknown";
+  const canSubmit = miss && quality.label !== "skip";
+  currentEntry = entry;
+  currentProjectId = null;
 
   $("result").innerHTML = `
     <div class="topline">
@@ -207,6 +240,25 @@ function render(data) {
       <div class="stat"><div class="label">${solved ? "axioms" : "tried"}</div><div>${solved ? esc(axioms.join(", ") || "none") : tried.length}</div></div>
     </div>
 
+    <div class="panel" style="padding:12px; margin-top:12px">
+      <div class="topline" style="margin-bottom:0">
+        <div>
+          <div class="label">Aristotle candidate quality</div>
+          <div><span class="badge ${esc(quality.label)}">${esc(quality.label)} · ${quality.score}/100</span></div>
+        </div>
+      </div>
+      <ul class="reasons">
+        ${(quality.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}
+      </ul>
+    </div>
+
+    <div class="actions">
+      <button id="sendAristotle" ${canSubmit ? "" : "disabled"}>Send to Aristotle</button>
+      <button id="pollAristotle" class="secondary" disabled>Check Aristotle status</button>
+      <span class="meta" id="aristotleMeta">${canSubmit ? "Explicit click required; this may spend Aristotle credits." : "Skipped unless candidate quality is maybe/good."}</span>
+    </div>
+    <div id="aristotleResult"></div>
+
     <div class="meta">
       corpus: ${data.report.total} statements · ${data.report.solved} solved · ${data.report.misses} misses · Mathlib import ${data.report.importMs} ms
     </div>
@@ -214,6 +266,50 @@ function render(data) {
     <div class="label" style="margin-top:14px">Lean statement</div>
     <pre>${esc(entry.statement)}</pre>
   `;
+  $("sendAristotle").onclick = sendToAristotle;
+  $("pollAristotle").onclick = pollAristotle;
+}
+
+async function sendToAristotle() {
+  const send = $("sendAristotle");
+  const poll = $("pollAristotle");
+  send.disabled = true;
+  $("aristotleMeta").textContent = "Submitting nonblocking Aristotle job...";
+  $("aristotleResult").innerHTML = "";
+  const response = await (await fetch("/api/aristotle-submit", {
+    method: "POST",
+    body: JSON.stringify({ entry: currentEntry })
+  })).json();
+  if (response.error) {
+    $("aristotleMeta").textContent = "Submission failed.";
+    $("aristotleResult").innerHTML = `<div class="error">${esc(response.error)}</div>`;
+    return;
+  }
+  currentProjectId = response.projectId;
+  $("aristotleMeta").textContent = `Submitted Aristotle project ${currentProjectId}.`;
+  poll.disabled = false;
+}
+
+async function pollAristotle() {
+  if (!currentProjectId) return;
+  const poll = $("pollAristotle");
+  poll.disabled = true;
+  $("aristotleMeta").textContent = "Checking Aristotle status...";
+  const response = await (await fetch(`/api/aristotle-status?projectId=${encodeURIComponent(currentProjectId)}`)).json();
+  poll.disabled = false;
+  if (response.error) {
+    $("aristotleMeta").textContent = "Status check failed.";
+    $("aristotleResult").innerHTML = `<div class="error">${esc(response.error)}</div>`;
+    return;
+  }
+  $("aristotleMeta").textContent = `Aristotle status: ${response.status}`;
+  if (response.proof) {
+    $("aristotleResult").innerHTML = `
+      <div class="label" style="margin-top:14px">Aristotle output (not locally trusted until reverified)</div>
+      <pre>${esc(response.proof)}</pre>
+      <div class="meta">downloaded from ${esc(response.proofPath || "archive")}</div>
+    `;
+  }
 }
 
 $("mine").onclick = async () => {
