@@ -1,368 +1,273 @@
 # lean-poly-mcp
 
-An MCP server whose interface **is** a polynomial functor, written in Lean 4, driving
-an agent that autoformalizes category theory — where Lean's kernel is the only thing
-ever trusted.
+A Lean 4 project that treats an MCP tool interface as a polynomial functor, then uses
+Lean's kernel as the trust boundary for proof-producing agents.
 
-> **Status: all phases done.** The Poly kernel is proved and axiom-free; the MCP
-> server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
-> verifies candidates against Mathlib in milliseconds; the graded benchmark and the
-> free tiers of the escalation ladder run locally; the agent runs as a lens against the
-> live server; Aristotle is wired for both formalization and proof filling, with one
-> live proof round trip recorded; the front end is a clean one-button Mathlib statement
-> miner for demos.
-> **Aristotle is the only external service** — there is no LLM and no
-> `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
-> See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
-> [`v1-idris/`](v1-idris/) for the Idris2 predecessor this is derived from.
+The current demo mines real `Mathlib.CategoryTheory` theorem statements, hides their
+existing proofs, tries cheap local tactics, and optionally sends good misses to
+Aristotle for proof reconstruction. Aristotle is useful, but never trusted directly:
+anything it returns must elaborate locally, pass the axiom whitelist, and match the
+requested statement.
 
-```sh
-lake build server
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check","arguments":{"source":"theorem cand : 2 + 2 = 4 := rfl"}}}' \
-  | ./.lake/build/bin/server
-# → {"content":[{"text":"checked — depends on no axioms","type":"text"}],
-#    "isError":false,"structuredContent":{"axioms":[],"outcome":"checked"}}
-```
+## What this is
 
-The oracle is an ordinary **MCP tool**, so any MCP client can drive it:
+This project has three connected parts:
 
-```sh
-claude mcp add lean-poly-mcp -- "$(pwd)/.lake/build/bin/server" Mathlib
-```
+1. A small polynomial-functor kernel in Lean.
+2. An MCP server whose tool registry is modeled as a coproduct of polynomial functors.
+3. A proof oracle and demo workflow for category theory statements from Mathlib.
+
+The practical question is:
+
+> Can an agent or external prover work on real formal category theory while Lean remains
+> the only trusted judge?
+
+The answer this repo demonstrates is yes, for proof reconstruction tasks. It does not
+claim to discover new mathematics.
+
+## What it does not claim
+
+The Mathlib miner is a benchmark generator, not a conjecture generator.
+
+When the UI shows an `interesting miss`, that means:
+
+> Mathlib already contains this theorem, but the local free tactic ladder did not
+> reprove it cheaply from the statement alone.
+
+It does not mean:
+
+> The theorem was previously unknown or unproved.
+
+The value of the workflow is that it produces real, checkable proof tasks from a large
+formal library without spending model calls inventing random lemmas.
 
 ## Demo
 
-For a clean local demo, double-click either file in the repo root:
+For the clean local demo, double-click one of these from the repo root:
 
 ```text
 Mathlib Statement Miner.app
 Launch Mathlib Miner.command
 ```
 
-The launcher builds `miner-report`, starts `localhost:8770`, and opens the page. The UI
-does exactly one thing: press **Mine statement** to pull a real Mathlib
-`CategoryTheory` theorem, show its Lean statement, and mark the local tactic result as
-`solved locally` or `interesting miss`.
-
-The first click imports Mathlib and builds the report, so budget roughly 60–120 seconds.
-Later clicks use the cached report.
-
-## The idea
-
-In **Poly**, the category of polynomial functors (equivalently, containers in the
-sense of Abbott–Altenkirch–Ghani), an object is
-
-```
-p  =  Σ_{i : p.Pos}  y ^ p.Dir i
-```
-
-— positions are requests, directions are the responses that request admits. An MCP
-interface is exactly this. Once you say so, the rest of the system falls out of the
-structure rather than being designed separately:
-
-| Poly | Here |
-|---|---|
-| lens `p → y` | the **server** — a section, `(i : p.Pos) → p.Dir i` |
-| lens `y → p` | a **request**, and nothing more (see the caveat below) |
-| lens `S y^S → p` | the **agent** — a Moore machine |
-| the composite `S y^S → p → y` | **one round-trip**, which is exactly a state transition `S → S` |
-| `Σ (i : p.Pos), p.Dir i` | a **completed tool call** — request plus its response |
-| indexed coproduct `Σ_t p_t` | the **tool registry** — `Poly.sigma`, one summand per tool |
-| composition `p ◁ q` | a **two-step protocol** |
-| cofree comonoid `𝒞_p` | the space of **all sessions**; one run is a path through it |
-| `p` for the tactic engine | positions = proof states, directions = tactic outcomes |
-
-The last row is why tactic-level proof search and agentic tool use are the same
-construction here, seen at two altitudes.
-
-Two facts license the table, and both are machine-checked in
-[`Poly/Basic.lean`](Poly/Basic.lean) — `sectionEquiv` and `step`/`step_eq`:
-
-```lean
-Lens p y        ≃  ((i : p.Pos) → p.Dir i)   -- sections are servers
-Lens (S y^S) y  ≃  (S → S)                   -- so agent ∘ server is a state transition
-```
-
-**A caveat worth stating precisely,** since it is easy to get backwards and an earlier
-draft of this README did: a lens `y → p` is *not* a completed tool call. Its backward
-map lands in `y.Dir = 1`, so it carries no response; `Lens y p ≃ p.Pos` picks out a
-request only. A completed call is an element of `Σ (i : p.Pos), p.Dir i`, which is not
-a hom-set of `Poly` at all. Both statements are proved as `sectionEquiv` and `posEquiv`
-so the distinction is enforced rather than remembered.
-
-## Why Lean, and not Idris2
-
-`v1-idris/` is a complete, working MCP server and client in Idris2 built on the same
-container idea. Three things it documents as limitations are structural, not
-incidental, and Lean removes them:
-
-- **The oracle had to be a subprocess.** Idris2's elaborator lives inside the `idris2`
-  binary, so v1 spawned a compiler per candidate
-  ([`v1-idris/src/MCP/Proof.idr`](v1-idris/src/MCP/Proof.idr)). Lean's kernel is a
-  library — `import Lean` gives `Lean.Elab.process`, which takes an existing
-  `Environment` and returns the new one plus the message log, so candidates elaborate
-  in-process against an environment imported once.
-- **The soundness gate was a string grep.** v1 rejects candidates containing
-  `believe_me`, `assert_total`, `unsafePerformIO` and friends by substring search — a
-  blacklist, and blacklists leak. Lean replaces it with `Lean.collectAxioms`: a
-  kernel-level audit of what the proof term actually depends on, accepted only if that
-  set is contained in `{propext, Classical.choice, Quot.sound}`, with `sorryAx`
-  rejected outright.
-- **There was nothing to formalize *into*.** Mathlib's `CategoryTheory` hierarchy is
-  the target vocabulary that makes "autoformalize category theory" a real task.
-
-There is also a structural flaw in v1 being fixed here: its most elegant artifact,
-[`McpReal.idr`](v1-idris/vendor/container-compendium/mcp-demo/McpReal.idr), models the
-client as a genuine value of a dependent-lens type — but is not wired into the live
-transport. The elegant program and the running program are two different programs. In
-v2 they must be one: the server's live dispatch *is* the section, and the agent driving
-it *is* the lens.
-
-## The tool registry is the coproduct
-
-`ToolMCP = Poly.sigma toolPoly` — a position is a tool together with *that tool's*
-arguments, and a direction is *that tool's* own result type:
-
-```lean
-@[reducible] def toolPoly : ToolId → Poly
-  | .hello => ⟨Option String, fun _ => String⟩
-  | .check => ⟨CheckRequest, fun _ => Oracle.Outcome⟩
-```
-
-Adding a tool is one constructor and one case; the claim "adding a tool is taking a
-coproduct" is discharged in code rather than asserted in prose. The dependent structure
-survives all the way to the handler — `check` returns an `Oracle.Outcome`, not a
-stringly-typed envelope — and is flattened exactly once, at the wire boundary. Swap two
-branches and the compiler names the direction family:
-
-```
-but is expected to have type
-  ToolMCP.Dir ⟨ToolId.hello, snd✝⟩
-```
-
-## How far free tactics get
-
-The hand-curated benchmark is joined by a Mathlib miner:
-`Formalize.mineWellFormed` scans an already-imported environment for
-`CategoryTheory.*` declarations, renders their types as Lean statement strings, and
-keeps only statements the oracle can parse in the target preamble. The import remains an
-explicit caller cost; tests batch it once.
-
-`miner-report` turns that source into a candidate list:
-
-```sh
-lake exe miner-report --limit 2 --max-tier 0
-```
-
-It mines semantic slices (`Functor`, `NatTrans`, `Iso`, `Adjunction`, `Equivalence`,
-`yoneda`, `Limits`), runs the free ladder, and prints two lists: local wins and
-well-formed local misses. The misses are the cheap Aristotle queue; no model usage is
-spent inventing random lemmas.
-
-Tiers 0 and 1 of the escalation ladder are ordinary Lean tactics run through the same
-oracle as everything else — a local success is trusted no more than a remote one. The
-`search` tool exposes them, and `test/BenchmarkTest.lean` measures them:
-
-```
-tier 0:  7/7   solved with no network        (the category laws)
-tier 1:  2/4                                 (needs a real rewrite)
-tier 2: 10/11                                (statements about Poly itself)
-```
-
-That bounds what a paid prover is actually for. Two caveats matter more than the numbers:
-`exact?` "solving" a tier-2 goal often means it *found* a lemma we already proved, so the
-corpus marks genuinely-absent statements `[novel]`; and the one informative miss —
-`a trace of n steps has n entries` — needs **induction**, which no discharge tactic does.
-
-## The front end
-
-The UI is intentionally narrow: one page, one button, one task — mine a Mathlib
-statement and show whether the local ladder solved it or missed it. See **Demo** above
-for the double-click launchers.
-
-The development command is:
+Or run it manually:
 
 ```sh
 lake build miner-report
 python3 web/serve.py
 ```
 
-The first click pays the Mathlib import and report generation cost; the result is cached
-for the rest of the session.
+Then open:
 
-## Aristotle, and what we do with what it returns
-
-Tier 2 is the only component that leaves the machine. `formalize` proposes a Lean
-statement from prose/LaTeX; `submit` proposes a proof by filling `sorry`s. Both are
-untrusted. Proof jobs are job-based (submissions return a handle, never a proof), and
-**everything Aristotle returns goes through our oracle before it is called evidence**.
-
-Replay fixtures cover both paths: `formalize.txt` for statement parsing and
-`submit/status/proof` for the proof round trip. Tests and demos use those fixtures and do
-not contact Aristotle.
-
-One live round trip, 2026-08-01, on the single benchmark goal the free ladder could not
-reach — it needs induction:
-
-```
-submit   → project 385577ec-…      (non-blocking)
-status   → COMPLETE after ~3 min
-download → the sorry, filled:
-
-  induction n generalizing s with
-  | zero => rfl
-  | succ n ih =>
-    simp only [trace, List.length_cons]
-    exact congrArg Nat.succ (ih (step agent server s))
+```text
+http://localhost:8770
 ```
 
-Our verdict, not theirs:
+The first click imports Mathlib and builds the cached mining report, so it can take
+roughly 60-120 seconds. Later clicks use the cached report.
 
-```
-Poly/Basic.lean:   UNCHANGED       (it did not edit the kernel to suit the proof)
-VERDICT:           checked
-axioms:            none
-statement matched: α-equivalent to the goal submitted
-```
+The page does one thing: mine a real `Mathlib.CategoryTheory` statement and show whether
+the local tactic ladder solved it or missed it. If a miss is scored as a good Aristotle
+candidate, the UI can submit it explicitly, poll for status changes, and display the
+downloaded Aristotle summary and Lean output.
 
-A theorem about **our own kernel**, proved externally and verified locally — which is
-exactly what pinning to Aristotle's toolchain buys. `test/AristotleTest.lean` replays the
-recorded run offline, but re-runs the *real* oracle, so it still fails if the proof stops
-checking or starts depending on an axiom.
+Tests and replay fixtures do not contact Aristotle. Live Aristotle calls happen only
+when the UI submit button or a live Aristotle command is used deliberately.
 
-## The agent is a lens
+## Quick Check
 
-`Agent.prover : Lens (State y^State) MCP` — an ordinary value of the kernel's lens type.
-`Agent.run` pumps it with `Poly.stepIO`, the Kleisli analogue of `Poly.step`; `stepIO_pure`
-proves the two agree definitionally when the server is pure. **The runtime executes that
-value**, so there is no second implementation to drift out of sync — which was v1's
-structural flaw.
+Build and run the compact local sweep:
 
-```
-── ladder solves it                      [177 ms, 2 states]
-     search — trying the free ladder
-     SOLVED via tier 0 `simp` ([Quot.sound, propext])
-
-── ladder exhausts (Phase 5 escalates)  [7482 ms, 2 states]
-     search — trying the free ladder
-     NEEDS PROVER — free ladder exhausted after 9 tactics
-
-── supplied candidate is rejected         [17 ms, 2 states]
-     verify — checking a supplied candidate
-     REJECTED — axioms outside the whitelist: [sorryAx]
+```sh
+lake build
+./scripts/check.sh
 ```
 
-Termination is a **fixed point**, not a state: a lens has no notion of stopping, so
-`onPos` must answer for every state and terminal phases emit a harmless `tools/list` they
-ignore. A Moore machine runs forever; halting is a state that stops changing.
+Run the full Mathlib-backed sweep:
 
-## The oracle
+```sh
+./scripts/check.sh --full
+```
 
-The only trusted component. Three gates: elaborate, audit axioms, match the statement.
-Everything that *produces* proofs is untrusted.
+The full sweep imports Mathlib several times and is slower. It covers the Mathlib oracle
+tests, the category theory miner, the benchmark, and the agent runs.
 
-The audit is the part that matters. It is not a list of banned words — it is
-`Lean.collectAxioms` on the accepted term, rejecting anything outside
-`{propext, Classical.choice, Quot.sound}`. Measured behaviour, from
-[`test/OracleTest.lean`](test/OracleTest.lean):
+## MCP Smoke Test
 
-| attack | verdict |
+The MCP server speaks JSON-RPC over stdio:
+
+```sh
+lake build server
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check","arguments":{"source":"theorem cand : 2 + 2 = 4 := rfl"}}}' \
+  | ./.lake/build/bin/server
+```
+
+The server prints startup lines, then a JSON-RPC response with this shape:
+
+```json
+{
+  "content": [
+    {
+      "text": "... checked ... depends on no axioms ...",
+      "type": "text"
+    }
+  ],
+  "isError": false,
+  "structuredContent": {
+    "axioms": [],
+    "outcome": "checked"
+  }
+}
+```
+
+The exposed MCP tools are:
+
+| tool | purpose |
 |---|---|
-| `by sorry` | `unsoundAxioms [sorryAx]` — note `sorry` is only a *warning* to the elaborator, so it sails through gate 1 |
-| `by native_decide` | `unsoundAxioms [Lean.ofReduceBool, Lean.trustCompiler]` |
-| a hand-rolled `axiom` | `unsoundAxioms [oops]` |
-| proves the **negation** of the request | `statementMismatch`, with the type mismatch verbatim |
-| `Classical.em` | `checked [Classical.choice, Quot.sound, propext]` — allowed, and disclosed |
+| `hello` | simple connectivity check |
+| `check` | elaborate and audit a Lean candidate |
+| `search` | run the local tactic ladder before escalation |
 
-The `native_decide` row is the argument for auditing over blacklisting, and the
-toolchain move sharpened it. On our pin it introduces `Lean.ofReduceBool` and
-`Lean.trustCompiler`; on v4.33.0-rc1 it instead minted a *per-declaration* axiom named
-after the declaration being proved. So a name-based gate would need names that vary with
-both the declaration **and** the toolchain. The whitelist needs to know none of them —
-`native_decide` is named nowhere in `Oracle/Kernel.lean`.
+## How Mathlib Mining Works
 
-The `statementMismatch` row is the failure v1 hit live: asked to prove something false,
-the model proved its negation — a true theorem, axiom-clean, and *not what was asked*.
-v1 could only disclose this in a prose paraphrase. Here it is caught.
+The miner does not scrape source files and does not ask a language model for ideas.
+It works inside Lean:
 
-### Performance
+1. Import `Mathlib`.
+2. Read Lean's elaborated environment.
+3. Walk declarations whose names start with `CategoryTheory`.
+4. Keep theorem-like declarations with usable types.
+5. Pretty-print each declaration type as a Lean statement.
+6. Group statements into slices such as functors, natural transformations, adjunctions,
+   equivalences, Yoneda, limits, and isomorphisms.
+7. Run the local tactic ladder through the same oracle used everywhere else.
+8. Mark each candidate as `solved locally`, `interesting miss`, or unusable.
+9. Score misses for Aristotle using local heuristics: topic, statement length,
+   namespace signal, and elaborator noise.
 
-The oracle elaborates **in-process** via `Lean.Elab.process`, against an environment
-imported once at startup:
+The command-line report is:
 
-```
-[63843 ms] import Mathlib (ONCE, at startup)
-   [139 ms] identity is a left unit for ≫          → checked [propext]
-    [23 ms] iso hom ≫ inv = id, statement matched  → checked [propext]
-    [25 ms] functors preserve retractions          → checked []
-     [6 ms] ATTACK: sorry in a Mathlib proof       → unsoundAxioms [sorryAx]
+```sh
+lake exe miner-report --limit 2 --max-tier 0
 ```
 
-The plan anticipated needing `leanprover-community/repl` as a side process with pickled
-environments to make this tractable. It isn't necessary: reusing the `Environment`
-in-process gives millisecond candidates directly, with no subprocess and no IPC.
+JSON mode is what the web UI uses:
 
-## Layout
-
-```
-Poly/         the Poly kernel — objects, lenses, ⊕ ⊗ × ◁, and the two equivalences above
-Mcp/          the MCP interface as a polynomial; server as a section; JSON-RPC transport
-Oracle/       in-process elaboration, axiom audit, statement matching
-Formalize/    category-theory autoformalization and its graded benchmark
-Agent/        the agent as a lens S y^S → MCP
-Aristotle/    Harmonic Aristotle API client (job-based; output re-verified locally)
-web/          front end — one-button Mathlib statement miner
-test/
-v1-idris/     the Idris2 predecessor, preserved intact
+```sh
+lake exe miner-report --limit 2 --max-tier 0 --json
 ```
 
-Git history from v1 is preserved in this repository, so `git log` shows the whole
-evolution rather than starting from a synthetic initial commit.
+## Trust Model
 
-## Toolchain — pinned to Aristotle's, deliberately
+Everything that produces a proof is untrusted. Lean is the judge.
 
+The oracle has three gates:
+
+1. **Elaboration:** Lean must accept the candidate.
+2. **Axiom audit:** `Lean.collectAxioms` must be contained in the whitelist.
+3. **Statement match:** the accepted theorem statement must match the requested one.
+
+The axiom whitelist is:
+
+```text
+propext
+Classical.choice
+Quot.sound
 ```
+
+This catches failures that string filters miss. For example, `sorry` elaborates but
+depends on `sorryAx`, and `native_decide` can introduce compiler trust axioms. Those are
+rejected by the axiom audit rather than by searching for banned words.
+
+## Aristotle Integration
+
+Aristotle has two roles:
+
+| command | role |
+|---|---|
+| `formalize` | prose or LaTeX to a Lean statement |
+| `submit` | fill `sorry`s in a Lean project |
+
+The demo currently emphasizes `submit`: mine a known Mathlib theorem statement, create
+a small Lean project with `theorem cand : ... := by sorry`, submit it to Aristotle, poll
+the job, download the result, and display the summary and Lean file.
+
+Downloaded Aristotle output is not evidence until it is rechecked locally by the oracle.
+Replay fixtures cover Aristotle paths offline so normal tests do not spend credits or
+depend on network availability.
+
+## Architecture
+
+The core dictionary is:
+
+| polynomial structure | system meaning |
+|---|---|
+| positions | requests |
+| directions | valid responses for a request |
+| section `Lens p y` | server implementation |
+| coproduct `Poly.sigma` | tool registry |
+| composite with a stateful lens | one agent step |
+| completed pair `Sigma i, p.Dir i` | completed tool call |
+
+Two Lean facts carry the main interpretation:
+
+```lean
+Lens p y        ~=  ((i : p.Pos) -> p.Dir i)
+Lens (S y^S) y  ~=  (S -> S)
+```
+
+In prose: a server is a section of its interface, and an agent composed with a server is
+a state transition.
+
+The project deliberately keeps the elegant model and the running transport connected:
+the live MCP server dispatch follows the same typed interface that the polynomial model
+describes, then flattens to JSON only at the wire boundary.
+
+## Toolchain
+
+The Lean and Mathlib versions are pinned to Aristotle's current target:
+
+```text
 leanprover/lean4:v4.28.0
-mathlib  8f9d9cff6bd728b17a24e163c9402775d9e6a365   (= tag v4.28.0)
+mathlib 8f9d9cff6bd728b17a24e163c9402775d9e6a365
 ```
 
-**Do not bump either to chase a newer Mathlib.** Re-verifying Aristotle's output against
-our own kernel is the whole trust story, and it only works if both sides speak the same
-Mathlib. Under version skew a failed re-verification is ambiguous — unsound, or a lemma
-renamed in the intervening commits? — and an ambiguous verdict destroys exactly what the
-oracle exists to provide.
+Do not bump these casually. The trust story depends on rechecking Aristotle output
+against the same Lean and Mathlib versions used to produce it. If the versions drift, a
+failed verification becomes ambiguous: the proof might be wrong, or the library might
+simply have changed.
 
-Two things fall out of this. It puts us on a stable release rather than a release
-candidate, with Mathlib pinned to a commit rather than the moving `master`. And
-[`sinhp/Poly`](https://github.com/sinhp/Poly) pins `v4.28.0-rc1` — the same release line
-— so it is back in range as an optional cross-check. The small vendored `Poly/` kernel
-stays as the thing the server compiles against: fast, readable, no version risk.
+Setup:
 
-```bash
+```sh
 brew install elan-init
-lake update && lake exe cache get
+lake update
+lake exe cache get
 lake build
 ./scripts/check.sh --full
 ```
 
-## What this will and will not claim
+## Repository Layout
 
-Stated up front, because the distinction is the point of the project.
+```text
+Poly/         polynomial functor kernel: objects, lenses, products, sums, composition
+Mcp/          MCP interface, tool registry, server section, JSON-RPC transport
+Oracle/       in-process Lean elaboration, axiom audit, statement matching
+Tactics/      local proof-search ladder
+Formalize/    Mathlib category theory miner and benchmark reports
+Agent/        agent as a lens-driven runtime
+Aristotle/    Aristotle client plus offline replay fixtures
+web/          local demo UI and server
+test/         Lean tests and replay tests
+docs/         longer design notes and paper-style explanation
+v1-idris/     Idris2 predecessor, preserved for comparison
+```
 
-**Checkable by the kernel:** that the interface is a polynomial functor and the server
-a section of it; that every returned proof elaborates and depends only on the
-whitelisted axioms, with the axiom list shown; that the proved statement matches the
-requested statement up to α-equivalence.
+## Further Reading
 
-**Not claimed:** that an *English* prompt was proven — the formalization step is
-unverified in principle, and v1's README documents a live instance where a model
-silently proved the negation of a false prompt and reported success. Nor that the
-running binary "is" a morphism in Poly in any mechanized sense: it is *specified* as
-one in Lean, and that Lean value is what executes, but there is no mechanized bridge
-between the Lean semantics and the compiled program's IO behaviour.
-
-The container/polynomial-functor correspondence, interaction structures
-(Hancock–Setzer), and dynamical systems as lenses (Niu–Spivak) are established
-results. Nothing here claims novelty for the theory; the contribution is a working
-system built on it.
+- [`docs/paper-style-explanation.md`](docs/paper-style-explanation.md) gives the longer
+  research narrative.
+- [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) records the implementation
+  phases and design history.
+- [`v1-idris/`](v1-idris/) contains the predecessor system.
