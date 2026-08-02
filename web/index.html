@@ -356,7 +356,15 @@ async function pollAristotle(options = {}) {
   poll.disabled = false;
   if (response.error) {
     $("aristotleMeta").textContent = "Status check failed.";
-    $("aristotleResult").innerHTML = `<div class="error">${esc(response.error)}</div>`;
+    $("aristotleResult").innerHTML = `
+      <div class="transient-status">
+        <div class="label" style="margin-top:14px">Transient Aristotle status error</div>
+        <div class="error">${esc(response.error)}</div>
+      </div>
+    `;
+    if (auto) {
+      scheduleAristotlePoll();
+    }
     return;
   }
   setAristotleStatus(response.status, isTerminalStatus(response.status) ? "" : " · polling every 15s");
@@ -379,6 +387,11 @@ async function pollAristotle(options = {}) {
       <pre>${esc((response.downloadFiles || []).join("\n") || "No files listed in downloaded artifact.")}</pre>
       <div class="meta">No Lean proof file matching the expected theorem shape was found.</div>
     `;
+  } else {
+    const stale = $("aristotleResult").querySelector(".transient-status");
+    if (stale) {
+      $("aristotleResult").innerHTML = "";
+    }
   }
   if (!isTerminalStatus(response.status)) {
     scheduleAristotlePoll();
