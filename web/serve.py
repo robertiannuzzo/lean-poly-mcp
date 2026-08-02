@@ -7,6 +7,7 @@ Then open http://localhost:8770
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -216,12 +217,15 @@ class AristotleJobs:
             timeout=120,
             env=os.environ.copy(),
         )
+        (job_dir / "submit.stdout").write_text(out.stdout, encoding="utf-8")
+        (job_dir / "submit.stderr").write_text(out.stderr, encoding="utf-8")
         if out.returncode != 0:
             return {"error": out.stderr[-1200:] or out.stdout[-1200:] or "aristotle submit failed", "quality": quality}
 
-        project_id = self.parse_project_id(out.stdout)
+        raw_submit = (out.stdout + "\n" + out.stderr).strip()
+        project_id = self.parse_project_id(raw_submit)
         if not project_id:
-            return {"error": "could not parse Aristotle project id", "raw": out.stdout[-1200:], "quality": quality}
+            return {"error": "could not parse Aristotle project id", "raw": raw_submit[-2000:], "quality": quality}
 
         record = {
             "localId": local_id,
@@ -294,10 +298,14 @@ class AristotleJobs:
 
     @staticmethod
     def parse_project_id(text):
-        marker = "Project created:"
-        if marker not in text:
-            return ""
-        return text.split(marker, 1)[1].splitlines()[0].strip().replace(" ", "")
+        for marker in ["Project created:", "Project ID:", "Project id:", "project_id:", "projectId:"]:
+            if marker in text:
+                candidate = text.split(marker, 1)[1].splitlines()[0].strip().strip('"').strip("'")
+                candidate = candidate.replace(" ", "")
+                if candidate:
+                    return candidate
+        match = re.search(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", text)
+        return match.group(0) if match else ""
 
     @staticmethod
     def parse_status(text):

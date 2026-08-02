@@ -294,7 +294,10 @@ async function sendToAristotle() {
   })).json();
   if (response.error) {
     $("aristotleMeta").textContent = "Submission failed.";
-    $("aristotleResult").innerHTML = `<div class="error">${esc(response.error)}</div>`;
+    $("aristotleResult").innerHTML = `
+      <div class="error">${esc(response.error)}</div>
+      ${response.raw ? `<div class="label" style="margin-top:10px">raw Aristotle output</div><pre>${esc(response.raw)}</pre>` : ""}
+    `;
     return;
   }
   currentProjectId = response.projectId;
