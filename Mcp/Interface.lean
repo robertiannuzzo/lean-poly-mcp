@@ -6,23 +6,32 @@ import Oracle.Kernel
 /-!
 # The MCP interface as a polynomial functor
 
-Positions are requests, directions are the responses to *that* request, and the server
-is a section.
+Positions are requests, directions are the responses to *that* request.
 
-Phase 3 changes the shape of that claim, in a way worth being precise about. The
-interface is now a **coproduct**
+The interface is a coproduct of two very different summands:
 
-  `MCP = PureMCP ⊕' OracleMCP`
+  `MCP = PureMCP ⊕' ToolMCP`
 
-and the two summands are not the same kind of thing. `PureMCP` — initialize, tools/list,
-tools/call — is served by a genuine `Lens PureMCP y`: a pure section, exactly as in
-Phase 2, and `pureDispatch_eq_handle` still holds by `rfl`. `OracleMCP` cannot be:
-verifying a proof runs the elaborator, so its handler is effectful, and the whole
-server is a section only in the Kleisli category of `IO` (see `Poly/Kleisli.lean`).
+`PureMCP` (initialize, tools/list) is served by a genuine `Lens PureMCP y` — a pure
+section, and `pureDispatch_eq_handle` still holds by `rfl`. `ToolMCP` cannot be:
+verifying a proof runs the elaborator, so its handler is effectful and the whole server
+is a section only in the Kleisli category of `IO` (see `Poly/Kleisli.lean`). The
+coproduct is what lets the pure claim survive intact on the summand where it is true
+instead of being weakened everywhere.
 
-So the coproduct is doing real work here rather than being a nice way to describe a
-list. It is what lets the pure claim survive intact on the summand where it is true,
-instead of being weakened everywhere to accommodate the summand where it is not.
+`ToolMCP` is itself an **indexed** coproduct, `Poly.sigma toolPoly` — one summand per
+tool. Adding a tool is one constructor of `ToolId` and one case of `toolPoly`; nothing
+else in this file changes shape. That is the registry-as-coproduct claim discharged in
+code rather than asserted in prose.
+
+## Why tools and not custom methods
+
+v1 exposed `check` as a top-level JSON-RPC method. That works with a hand-written client
+and with nothing else: a standards-compliant MCP client discovers `tools/list` and calls
+`tools/call`, and never learns a custom method exists. Routing the oracle through the
+tool registry makes the server usable by *any* MCP client, and costs nothing — the
+dependent structure is preserved internally and flattened only at the wire boundary, in
+`encodeResult`.
 -/
 
 namespace Mcp
@@ -32,77 +41,115 @@ open Poly
 
 /-! ## The pure fragment -/
 
-/-- Requests answerable without touching the outside world. -/
+/-- Requests answerable without touching the outside world. Note `tools/call` is *not*
+here — it dispatches into the registry below. -/
 inductive PureMethod where
   | initialize (protocolVersion : String)
   | listTools
-  | callTool (name : String) (args : Option Json)
 
 abbrev PureResultOf : PureMethod → Type
   | .initialize _ => InitializeResult
   | .listTools => List Tool
-  | .callTool _ _ => CallToolResult
 
 abbrev PureMCP : Poly := ⟨PureMethod, PureResultOf⟩
 
-/-! ## The oracle fragment -/
+/-! ## The tool registry -/
 
-/-- A verification request. Mirrors `Oracle.Request` minus the declaration name, which
-this server fixes at `cand` so the wire format cannot smuggle in a different target. -/
+/-- A verification request. `declName` is fixed at `cand` by this server rather than
+supplied by the caller, so the wire format cannot redirect the audit at a different
+declaration. -/
 structure CheckRequest where
   preamble : String := ""
   source : String
   statement : Option String := none
+  deriving Repr
 
-/-- Directions here are verdicts. Note every request has the *same* response type,
-so this summand is a monomial — the dependency is trivial for `check` alone, and the
-interesting dependency lives across the coproduct. -/
-abbrev OracleMCP : Poly := ⟨CheckRequest, fun _ => Oracle.Outcome⟩
+inductive ToolId where
+  | hello
+  | check
+  deriving DecidableEq, Repr
+
+/-- **Each tool is itself a polynomial**: its arguments are the positions, its natural
+result type is the direction.
+
+Note the direction of `check` is `Oracle.Outcome`, not a stringly-typed
+`CallToolResult` — the typed layer is preserved all the way to the handler, and the MCP
+envelope is applied once, at the edge, in `encodeResult`. Losing that distinction is how
+a tool surface degenerates into passing JSON around. -/
+@[reducible] def toolPoly : ToolId → Poly
+  | .hello => ⟨Option String, fun _ => String⟩
+  | .check => ⟨CheckRequest, fun _ => Oracle.Outcome⟩
+
+/-- The registry: `Σ_{t : ToolId} toolPoly t`. -/
+abbrev ToolMCP : Poly := Poly.sigma toolPoly
 
 /-! ## The whole interface -/
 
-/-- **The interface is a coproduct.** Adding a family of requests is `⊕'`, not an
-edit to an inductive type. -/
-abbrev MCP : Poly := PureMCP ⊕' OracleMCP
+abbrev MCP : Poly := PureMCP ⊕' ToolMCP
 
-/-- A request: a position of `MCP`, which is by construction a sum. -/
+/-- A request: a position of `MCP`. -/
 abbrev Method := MCP.Pos
 
-/-- The response type for a request — `MCP.Dir`, spelled out for readability. -/
+/-- The response type for a request. -/
 abbrev ResultOf : Method → Type := MCP.Dir
 
+/-- The direction at a tool position is that tool's own result type — by `rfl`. This is
+the registry claim in its most direct form. -/
+example (r : CheckRequest) : ResultOf (.inr ⟨.check, r⟩) = Oracle.Outcome := rfl
+example (n : Option String) : ResultOf (.inr ⟨.hello, n⟩) = String := rfl
 example : ResultOf (.inl .listTools) = List Tool := rfl
-example (r : CheckRequest) : ResultOf (.inr r) = Oracle.Outcome := rfl
 
-/-! ## The tools -/
+/-! ## Tool metadata
 
-def helloTool : Tool where
-  name := "hello"
-  description := "Say hello. Optional 'name' argument."
-  inputSchema := Json.mkObj
-    [ ("type", Json.str "object")
-    , ("properties", Json.mkObj
-        [ ("name", Json.mkObj
-            [ ("type", Json.str "string")
-            , ("description", Json.str "Name to greet") ]) ]) ]
+Names, schemas and the lookup table all derive from one enumeration, so the advertised
+registry and the dispatchable registry cannot drift apart. -/
 
-def tools : List Tool := [helloTool]
+def allTools : List ToolId := [.hello, .check]
 
-def callHello (args : Option Json) : CallToolResult :=
-  let name := match args.bind (·.getObjValAs? String "name" |>.toOption) with
-    | some n => n
-    | none => "world"
-  ⟨[.text s!"Hello, {name}! (from the Lean 4 MCP server)"], false⟩
+def toolName : ToolId → String
+  | .hello => "hello"
+  | .check => "check"
 
-/-! ## The pure server — unchanged from Phase 2 -/
+def toolInfo : ToolId → Tool
+  | .hello =>
+    { name := toolName .hello
+      description := "Say hello. Optional 'name' argument."
+      inputSchema := Json.mkObj
+        [ ("type", Json.str "object")
+        , ("properties", Json.mkObj
+            [ ("name", Json.mkObj
+                [ ("type", Json.str "string")
+                , ("description", Json.str "Name to greet") ]) ]) ] }
+  | .check =>
+    { name := toolName .check
+      description :=
+        "Verify a Lean declaration against the kernel: elaborate it, audit the axioms it \
+         depends on, and (if 'statement' is given) check it proves that statement. \
+         Returns structured evidence, never a bare boolean."
+      inputSchema := Json.mkObj
+        [ ("type", Json.str "object")
+        , ("properties", Json.mkObj
+            [ ("source", Json.mkObj
+                [ ("type", Json.str "string")
+                , ("description", Json.str "Lean source defining a declaration named 'cand'.") ])
+            , ("statement", Json.mkObj
+                [ ("type", Json.str "string")
+                , ("description", Json.str "Optional. The statement 'cand' must prove.") ])
+            , ("preamble", Json.mkObj
+                [ ("type", Json.str "string")
+                , ("description", Json.str "Optional. Lines prepended to both the candidate and the statement probes, typically `open` commands.") ]) ])
+        , ("required", toJson [ "source" ]) ] }
 
-/-- Exhaustive dependent function from a request to a value of *that request's*
-response type. See `test/McpTest.lean` for the verbatim rejection of a wrong shape. -/
+def tools : List Tool := allTools.map toolInfo
+
+def toolOfName (s : String) : Option ToolId :=
+  allTools.find? (fun t => toolName t == s)
+
+/-! ## The pure server -/
+
 def pureHandle : (m : PureMethod) → PureResultOf m
   | .initialize pv => ⟨pv, ⟨"lean-poly-mcp", "0.1.0"⟩⟩
   | .listTools => tools
-  | .callTool "hello" args => callHello args
-  | .callTool nm _ => ⟨[.text s!"unknown tool: {nm}"], true⟩
 
 /-- **The pure server, as a lens.** Still exactly a section of its summand. -/
 def pureServer : Lens PureMCP y := (sectionEquiv PureMCP).invFun pureHandle
@@ -113,29 +160,48 @@ theorem pureDispatch_eq_handle :
 
 /-! ## The whole server -/
 
-/-- Verify one candidate. The declaration name is fixed at `cand` by this server, not
-supplied by the caller. -/
-def runCheck (env : Lean.Environment) (r : CheckRequest) : IO Oracle.Outcome :=
-  Oracle.verify env
-    { preamble := r.preamble, source := r.source, expected? := r.statement }
+/-- Dispatch a tool call. Exhaustive over the registry, and each branch must produce a
+value of *that tool's* direction type. -/
+def handleTool (env : Lean.Environment) : (i : ToolMCP.Pos) → IO (ToolMCP.Dir i)
+  | ⟨.hello, name⟩ =>
+    pure s!"Hello, {name.getD "world"}! (from the Lean 4 MCP server)"
+  | ⟨.check, r⟩ =>
+    Oracle.verify env
+      { preamble := r.preamble, source := r.source, expected? := r.statement }
 
-/-- **The server**, as an effectful section of the coproduct: the copairing of the pure
-section (embedded by `Section.toIO`) with the oracle's effectful one. -/
+/-- **The server**, as an effectful section of the coproduct: the pure section embedded
+by `Section.toIO`, copaired with the registry's effectful one. -/
 def handle (env : Lean.Environment) : IOSection MCP
   | .inl m => Section.toIO ((sectionEquiv PureMCP).toFun pureServer) m
-  | .inr r => runCheck env r
+  | .inr t => handleTool env t
 
-/-- On the pure summand the server is still literally the pure handler, with `pure`
+/-- On the pure summand the server is still literally the pure handler with `pure`
 wrapped around it — nothing has been weakened, only extended. -/
 theorem handle_inl (env : Lean.Environment) (m : PureMethod) :
     handle env (.inl m) = pure (pureHandle m) := rfl
 
 /-! ## Decoding -/
 
+/-- What decoding can produce. `unknownTool` is deliberately *not* a position of the
+registry: the polynomial should contain exactly the tools that exist, and MCP says an
+unknown tool name is a **successful** `tools/call` reporting `isError`, not a protocol
+error. Keeping it here puts that case with the other transport-level outcomes instead of
+polluting the registry with a summand that can only fail. -/
 inductive Decoded where
   | ok (m : Method)
   | unknownMethod
   | badParams
+  | unknownTool (name : String)
+
+/-- Parse a tool's arguments into a position of *that tool's* polynomial — itself a
+dependent function over the registry. -/
+def parseArgs : (t : ToolId) → Option Json → Option (toolPoly t).Pos
+  | .hello, args => some (args.bind (·.getObjValAs? String "name" |>.toOption))
+  | .check, args => do
+    let src ← args.bind (·.getObjValAs? String "source" |>.toOption)
+    some { source := src
+           preamble := (args.bind (·.getObjValAs? String "preamble" |>.toOption)).getD ""
+           statement := args.bind (·.getObjValAs? String "statement" |>.toOption) }
 
 def decodeRequest (method : String) (params : Option Json) : Decoded :=
   match method with
@@ -145,21 +211,21 @@ def decodeRequest (method : String) (params : Option Json) : Decoded :=
   | "tools/list" => .ok (.inl .listTools)
   | "tools/call" =>
     match params.bind (·.getObjValAs? String "name" |>.toOption) with
-    | some nm => .ok (.inl (.callTool nm (params.bind (·.getObjVal? "arguments" |>.toOption))))
     | none => .badParams
-  | "check" =>
-    match params.bind (·.getObjValAs? String "source" |>.toOption) with
-    | some src =>
-      .ok (.inr
-        { source := src
-          preamble := (params.bind (·.getObjValAs? String "preamble" |>.toOption)).getD ""
-          statement := params.bind (·.getObjValAs? String "statement" |>.toOption) })
-    | none => .badParams
+    | some nm =>
+      match toolOfName nm with
+      | none => .unknownTool nm
+      | some t =>
+        match parseArgs t (params.bind (·.getObjVal? "arguments" |>.toOption)) with
+        | none => .badParams
+        | some pos => .ok (.inr ⟨t, pos⟩)
   | _ => .unknownMethod
 
-/-! ## Encoding -/
+/-! ## Encoding
 
-/-- Verdicts carry evidence, never a bare boolean. In particular `checked` always
+The wire boundary, and the only place the dependent structure is flattened. -/
+
+/-- Verdicts carry evidence, never a bare boolean — in particular `checked` always
 reports the axiom set it was accepted with, so a caller can audit the audit. -/
 def outcomeToJson : Oracle.Outcome → Json
   | .checked axioms => Json.mkObj
@@ -177,16 +243,44 @@ def outcomeToJson : Oracle.Outcome → Json
   | .badStatement d => Json.mkObj
       [ ("outcome", Json.str "bad_statement"), ("diagnostic", Json.str d) ]
 
-/-- Exhaustive over `Method`. The `check` case echoes the request back alongside the
-verdict — it can, because the *position* carries the request and the encoder receives
-both position and direction. -/
+/-- One-line human summary, so a client that only renders `content` still sees the
+verdict rather than an opaque blob. -/
+def outcomeSummary : Oracle.Outcome → String
+  | .checked axioms =>
+    if axioms.isEmpty then "checked — depends on no axioms"
+    else s!"checked — axioms: {axioms.toList.map toString}"
+  | .elabFailed _ => "elaboration failed"
+  | .missingDecl n => s!"did not define `{n}`"
+  | .unsoundAxioms axioms => s!"REJECTED — axioms outside the whitelist: {axioms.toList.map toString}"
+  | .statementMismatch _ => "REJECTED — proves a different statement than the one requested"
+  | .badStatement _ => "the requested statement is itself ill-formed here"
+
+/-- MCP's `tools/call` envelope. `structuredContent` carries the machine-readable
+verdict; `content` carries the same thing as text for clients that do not read it. -/
+def callToolJson (text : String) (isError : Bool) (structured : Option Json) : Json :=
+  let base : List (String × Json) :=
+    [ ("content", Json.arr #[Json.mkObj [("type", Json.str "text"), ("text", Json.str text)]])
+    , ("isError", Json.bool isError) ]
+  Json.mkObj (match structured with
+    | none => base
+    | some s => base ++ [("structuredContent", s)])
+
+/-- Exhaustive over `Method`.
+
+Note `check` returning `unsound_axioms` sets `isError := false`: the tool *ran*, and
+answered. MCP's `isError` means the invocation failed, not that the verdict was
+unwelcome — conflating the two would tell an agent to retry the call rather than to
+believe the rejection. -/
 def encodeResult : (m : Method) → ResultOf m → Json
   | .inl (.initialize _), r => toJson r
   | .inl .listTools, r => Json.mkObj [("tools", toJson r)]
-  | .inl (.callTool _ _), r => toJson r
-  | .inr req, o =>
-    match outcomeToJson o with
-    | .obj fields => .obj (fields.insert "source" (Json.str req.source))
-    | j => j
+  | .inr ⟨.hello, _⟩, greeting => callToolJson greeting false none
+  | .inr ⟨.check, _⟩, outcome =>
+    callToolJson (outcomeSummary outcome) false (some (outcomeToJson outcome))
+
+/-- The response for a tool name that is not in the registry: a successful call
+reporting an error, per MCP. -/
+def unknownToolJson (name : String) : Json :=
+  callToolJson s!"unknown tool: {name}" true none
 
 end Mcp

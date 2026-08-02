@@ -50,6 +50,10 @@ def handleMessage (env : Lean.Environment) (out : IO.FS.Stream) : JsonRpc.Messag
     | .badParams =>
       writeMessage out (.responseError id .invalidParams
         s!"{method}: missing or malformed params" none)
+    -- Per MCP, an unknown *tool* is a successful `tools/call` that reports `isError`,
+    -- not a protocol error — the request was well-formed, the tool just does not exist.
+    -- Contrast `.unknownMethod` above, which is a genuine `-32601`.
+    | .unknownTool nm => writeMessage out (.response id (unknownToolJson nm))
     | .ok m => writeMessage out (← respond env id m)
   | .notification method _ => logErr s!"notification: {method}"
   | .response _ _ => logErr "unexpected response received by server"

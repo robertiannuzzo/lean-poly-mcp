@@ -1,6 +1,6 @@
 # lean-poly-mcp — design and plan
 
-**Status: Phases 1–3 built and machine-checked. Phases 4–8 planned.**
+**Status: Phases 1–4 built and machine-checked. Remaining phases planned.**
 Revised 2026-08-01 for the Aristotle-only architecture. Supersedes the original
 `idris-mcp` upgrade plan.
 
@@ -39,7 +39,7 @@ instead of being designed separately:
 | `Σ (i : p.Pos), p.Dir i` | **one completed tool call** — request plus its response; *not* a hom-set |
 | a lens `S y^S → p` | **the agent** — a Moore machine |
 | the composite `S y^S → p → y` | **one round-trip**, which is exactly a state transition `S → S` |
-| coproduct `⊕'` | **the tool registry** — adding a family of tools is a coproduct |
+| indexed coproduct `Σ_t p_t` | **the tool registry** — `Poly.sigma`, one summand per tool |
 | composition `◁` | **a two-step protocol** |
 | cofree comonoid `𝒞_p` | **the space of all sessions**; one run is a path through it |
 | `p` for the tactic engine | positions = proof states, directions = tactic outcomes (Hancock–Setzer) |
@@ -124,7 +124,7 @@ cost-cap regimes in `CLAUDE.md`.
 
 ---
 
-## 3. Toolchain: pin to Aristotle's
+## 3. Toolchain: pinned to Aristotle's ✅ **done**
 
 Aristotle runs on fixed versions:
 
@@ -133,8 +133,8 @@ lean-toolchain   leanprover/lean4:v4.28.0
 mathlib          8f9d9cff6bd728b17a24e163c9402775d9e6a365   (= tag v4.28.0, 2026-02-16)
 ```
 
-We are currently on `v4.33.0-rc1` with Mathlib pinned to `master` — **4980 commits
-ahead** of Aristotle's. Both are wrong, for reasons beyond compatibility warnings:
+We were on `v4.33.0-rc1` with Mathlib pinned to `master` — **4980 commits ahead** of
+Aristotle's. Both were wrong, for reasons beyond compatibility warnings:
 
 **The trust story requires it.** Phase 5's discipline is *never trust Aristotle's claim of
 verification — re-check it locally*. That only works if both sides speak the same Mathlib.
@@ -152,12 +152,24 @@ the same one. Keep the vendored kernel as the thing the server compiles against 
 readable, no version risk), and add `sinhp/Poly` as an optional comparison rather than
 writing it off.
 
-**Risk to verify by trying:** the oracle depends on `Lean.Elab.process`'s signature and on
-`importModules (loadExts := true)`. `loadExts` is load-bearing — without it the
-environment cannot parse `n + 0`. If it is absent at 4.28 there is another route, but this
-is the item most likely to bite. `collectAxioms` and `enableInitializersExecution` are
-long-standing and safe. Cost is one-time and unattended: a toolchain download and a fresh
-Mathlib olean cache.
+**Outcome.** All four at-risk APIs exist at v4.28.0 with compatible signatures —
+`Lean.Elab.process` is identical, and `importModules` still has the load-bearing
+`loadExts`. Every source file compiled with **zero edits**.
+
+The move acted as a differential test and surfaced three real defects, none of them
+version trivia:
+
+1. **Our axiom output was non-deterministic.** `collectAxioms` returns traversal order,
+   which differs across toolchains. That set is user-facing evidence rendered into JSON a
+   caller audits, so `axiomsOf` now sorts. Fixed in the implementation, not the test.
+2. **`lake build` never built `Mcp/Transport`.** A docstring-only library root imported
+   none of its submodules; it only appeared to work because a stale olean from an earlier
+   `lake build server` was lying around, and failed the moment the build dir was cleaned.
+3. **The `native_decide` claim was toolchain-specific.** On v4.28.0 it introduces
+   `Lean.ofReduceBool` and `Lean.trustCompiler`; on v4.33.0-rc1 it minted a
+   per-declaration axiom. Both README and `Kernel.lean` had asserted one as *the* fact.
+   The corrected version is a stronger argument for auditing anyway: a name-based gate
+   would need names varying with the declaration **and** the toolchain.
 
 ---
 
@@ -240,7 +252,7 @@ mismatch verbatim.
 
 ---
 
-## 5. Phase 4 — tools, not methods
+## 5. Phase 4 — tools, not methods ✅ **done**
 
 `check` is currently a top-level JSON-RPC method, following v1. **That is wrong for any
 standards-compliant MCP client**, which discovers only `tools/list` and calls
@@ -255,8 +267,17 @@ Move the oracle surface into `tools`:
 | `search` | run the free tactic ladder (tier 0/1) |
 | `aristotle_submit` / `aristotle_status` / `aristotle_fetch` | the paid tier, job-based |
 
-The registry is already `⊕'`, so this is adding a summand rather than editing an
-inductive type. Drop `hello`.
+Done. The registry became a genuine **indexed** coproduct, `Poly.sigma toolPoly`, added
+to the kernel for the purpose: a position is a tool plus that tool's arguments, a
+direction is that tool's own result type. Binary `⊕'` would have forced every handler to
+match on `.inr (.inl …)`; the indexed form is what a registry actually is.
+
+`hello` was kept as a second summand — with one tool the coproduct proves nothing.
+
+One design decision worth recording: an unknown *tool name* is **not** a position of the
+registry. MCP says it is a successful `tools/call` reporting `isError`, so it lives in
+`Decoded` with the other transport-level outcomes. The polynomial then contains exactly
+the tools that exist, rather than a summand whose only possible response is an error.
 
 ---
 

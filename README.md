@@ -16,9 +16,16 @@ ever trusted.
 ```sh
 lake build server
 printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"check","params":{"source":"theorem cand : 2 + 2 = 4 := rfl"}}' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"check","arguments":{"source":"theorem cand : 2 + 2 = 4 := rfl"}}}' \
   | ./.lake/build/bin/server
-# → {"axioms":[],"outcome":"checked","source":"theorem cand : 2 + 2 = 4 := rfl"}
+# → {"content":[{"text":"checked — depends on no axioms","type":"text"}],
+#    "isError":false,"structuredContent":{"axioms":[],"outcome":"checked"}}
+```
+
+The oracle is an ordinary **MCP tool**, so any MCP client can drive it:
+
+```sh
+claude mcp add lean-poly-mcp -- "$(pwd)/.lake/build/bin/server" Mathlib
 ```
 
 ## The idea
@@ -41,7 +48,7 @@ structure rather than being designed separately:
 | lens `S y^S → p` | the **agent** — a Moore machine |
 | the composite `S y^S → p → y` | **one round-trip**, which is exactly a state transition `S → S` |
 | `Σ (i : p.Pos), p.Dir i` | a **completed tool call** — request plus its response |
-| coproduct `Σ_t p_t` | the **tool registry** |
+| indexed coproduct `Σ_t p_t` | the **tool registry** — `Poly.sigma`, one summand per tool |
 | composition `p ◁ q` | a **two-step protocol** |
 | cofree comonoid `𝒞_p` | the space of **all sessions**; one run is a path through it |
 | `p` for the tactic engine | positions = proof states, directions = tactic outcomes |
@@ -91,6 +98,28 @@ client as a genuine value of a dependent-lens type — but is not wired into the
 transport. The elegant program and the running program are two different programs. In
 v2 they must be one: the server's live dispatch *is* the section, and the agent driving
 it *is* the lens.
+
+## The tool registry is the coproduct
+
+`ToolMCP = Poly.sigma toolPoly` — a position is a tool together with *that tool's*
+arguments, and a direction is *that tool's* own result type:
+
+```lean
+@[reducible] def toolPoly : ToolId → Poly
+  | .hello => ⟨Option String, fun _ => String⟩
+  | .check => ⟨CheckRequest, fun _ => Oracle.Outcome⟩
+```
+
+Adding a tool is one constructor and one case; the claim "adding a tool is taking a
+coproduct" is discharged in code rather than asserted in prose. The dependent structure
+survives all the way to the handler — `check` returns an `Oracle.Outcome`, not a
+stringly-typed envelope — and is flattened exactly once, at the wire boundary. Swap two
+branches and the compiler names the direction family:
+
+```
+but is expected to have type
+  ToolMCP.Dir ⟨ToolId.hello, snd✝⟩
+```
 
 ## The oracle
 

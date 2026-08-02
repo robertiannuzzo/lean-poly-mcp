@@ -147,6 +147,19 @@ see it. -/
     | .inl i => p.Dir i
     | .inr j => q.Dir j
 
+/-- **Indexed coproduct** `Σ_{i : I} p i` — the shape a *registry* actually has.
+
+A position is a choice of index together with a position of that summand; a direction is
+a direction of that summand alone. Binary `sum` is the two-element case, but a tool
+registry is naturally indexed by a tool name rather than by nesting `⊕'`, and nesting
+would also make every handler match on `.inr (.inl …)`.
+
+This is what makes "adding a tool is taking a coproduct" a fact about the code rather
+than a slogan: a new tool is one constructor of `I` and one case of `p`. -/
+@[reducible] def sigma {I : Type u} (p : I → Poly.{u}) : Poly.{u} where
+  Pos := (i : I) × (p i).Pos
+  Dir := fun ⟨i, j⟩ => (p i).Dir j
+
 /-- Product: choose a position in each, respond in *one* of them. -/
 @[reducible] def prod (p q : Poly.{u}) : Poly.{u} where
   Pos := p.Pos × q.Pos
