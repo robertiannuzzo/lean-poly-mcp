@@ -1,6 +1,6 @@
 # lean-poly-mcp — design and plan
 
-**Status: Phases 1–4 built and machine-checked. Remaining phases planned.**
+**Status: Phases 1–4, 6 and 7 built and machine-checked. Agent, Aristotle and front end planned.**
 Revised 2026-08-01 for the Aristotle-only architecture. Supersedes the original
 `idris-mcp` upgrade plan.
 
@@ -304,7 +304,7 @@ a ceiling.
 
 ---
 
-## 7. Phase 6 — category theory, graded
+## 7. Phase 6 — category theory, graded ✅ **done**
 
 The benchmark doubles as the eval harness.
 
@@ -316,11 +316,31 @@ The benchmark doubles as the eval harness.
   structure it is built from, verified by its own kernel.
 
 **How far tier 0/1 gets with no network is itself a result worth reporting** — it bounds
-what the paid tier is actually for.
+what the paid tier is actually for. Measured:
+
+```
+tier 0:  7/7   solved with no network
+tier 1:  2/4
+tier 2: 10/11
+```
+
+Two caveats that matter more than the numbers:
+
+- **`exact?` proves nothing new.** On tier 2 it "solves" lens associativity by *finding*
+  `Lens.comp_assoc`, a lemma of our own kernel. That is library lookup. The corpus now
+  marks genuinely-absent statements `[novel]`; a tier-2 score built from restated library
+  lemmas would be flattering and meaningless.
+- **The one informative miss is `[novel] a trace of n steps has n entries`** — it needs
+  induction, and no discharge tactic does induction. That is a concrete, honest statement
+  of what the paid tier is for.
+
+`aesop_cat` never fires on tier 0, because `simp` is earlier in the ladder and solves all
+seven. So the per-tactic attribution is an artifact of rung order, not a claim about
+which tactic is better — noted in `docs/tactic-notes.lean` §3.
 
 ---
 
-## 8. Phase 7 — tactics
+## 8. Phase 7 — tactics ✅ **done**
 
 Four levels, so the understanding is shown rather than claimed:
 
@@ -331,8 +351,16 @@ Four levels, so the understanding is shown rather than claimed:
    already done.)
 3. **Expose them** — `tactic/state` and `tactic/apply`, making the tactic engine a
    polynomial the agent drives.
-4. **Fail informatively** — `docs/tactic-notes.lean`: where `simp` loops, why
-   `native_decide` is excluded from the whitelist, what `decide` cannot close.
+4. **Fail informatively** — `docs/tactic-notes.lean`, kept compiling: why `native_decide`
+   is excluded from the whitelist, why `decide` cannot close a `Type`-level goal, how rung
+   order decides which tactic gets credit, the macro-hygiene trap below, and why `rfl`
+   succeeding here is weak evidence a statement is interesting.
+
+The hygiene trap is worth stating, since it is the kind of thing only writing a tactic
+teaches: `poly_ext` first ran `intro i d` internally, and callers then got
+`unknown identifier 'd'` for a binder plainly visible in the goal — macro-introduced names
+are hygienic and deliberately not capturable. The fix was to `intro` only on the branch
+that closes the goal, and otherwise hand back the un-introduced `∀`.
 
 ---
 

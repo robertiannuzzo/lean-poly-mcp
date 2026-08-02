@@ -4,10 +4,11 @@ An MCP server whose interface **is** a polynomial functor, written in Lean 4, dr
 an agent that autoformalizes category theory — where Lean's kernel is the only thing
 ever trusted.
 
-> **Status: Phases 1–3 done.** The Poly kernel is proved and axiom-free; the MCP
+> **Status: Phases 1–4, 6, 7 done.** The Poly kernel is proved and axiom-free; the MCP
 > server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
-> verifies candidates against Mathlib in milliseconds. The autoformalization
-> benchmark, tactics, the agent, Aristotle, and the front end are not written yet.
+> verifies candidates against Mathlib in milliseconds; the graded benchmark and the
+> free tiers of the escalation ladder run locally. The agent, Aristotle, and the front
+> end are not written yet.
 > **Aristotle is the only external service** — there is no LLM and no
 > `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
 > See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
@@ -120,6 +121,23 @@ branches and the compiler names the direction family:
 but is expected to have type
   ToolMCP.Dir ⟨ToolId.hello, snd✝⟩
 ```
+
+## How far free tactics get
+
+Tiers 0 and 1 of the escalation ladder are ordinary Lean tactics run through the same
+oracle as everything else — a local success is trusted no more than a remote one. The
+`search` tool exposes them, and `test/BenchmarkTest.lean` measures them:
+
+```
+tier 0:  7/7   solved with no network        (the category laws)
+tier 1:  2/4                                 (needs a real rewrite)
+tier 2: 10/11                                (statements about Poly itself)
+```
+
+That bounds what a paid prover is actually for. Two caveats matter more than the numbers:
+`exact?` "solving" a tier-2 goal often means it *found* a lemma we already proved, so the
+corpus marks genuinely-absent statements `[novel]`; and the one informative miss —
+`a trace of n steps has n entries` — needs **induction**, which no discharge tactic does.
 
 ## The oracle
 

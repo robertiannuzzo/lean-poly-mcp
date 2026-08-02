@@ -1,3 +1,5 @@
+import Formalize.Benchmark
+
 /-!
 # Formalize
 

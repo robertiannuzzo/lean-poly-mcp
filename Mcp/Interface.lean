@@ -2,6 +2,7 @@ import Poly.Basic
 import Poly.Kleisli
 import Mcp.Types
 import Oracle.Kernel
+import Tactics.Search
 
 /-!
 # The MCP interface as a polynomial functor
@@ -64,9 +65,17 @@ structure CheckRequest where
   statement : Option String := none
   deriving Repr
 
+/-- A search request: run the free tiers of the escalation ladder against a goal. -/
+structure SearchRequest where
+  preamble : String := ""
+  goal : String
+  maxTier : Nat := 1
+  deriving Repr
+
 inductive ToolId where
   | hello
   | check
+  | search
   deriving DecidableEq, Repr
 
 /-- **Each tool is itself a polynomial**: its arguments are the positions, its natural
@@ -79,6 +88,7 @@ a tool surface degenerates into passing JSON around. -/
 @[reducible] def toolPoly : ToolId → Poly
   | .hello => ⟨Option String, fun _ => String⟩
   | .check => ⟨CheckRequest, fun _ => Oracle.Outcome⟩
+  | .search => ⟨SearchRequest, fun _ => Tactics.Outcome⟩
 
 /-- The registry: `Σ_{t : ToolId} toolPoly t`. -/
 abbrev ToolMCP : Poly := Poly.sigma toolPoly
@@ -104,11 +114,12 @@ example : ResultOf (.inl .listTools) = List Tool := rfl
 Names, schemas and the lookup table all derive from one enumeration, so the advertised
 registry and the dispatchable registry cannot drift apart. -/
 
-def allTools : List ToolId := [.hello, .check]
+def allTools : List ToolId := [.hello, .check, .search]
 
 def toolName : ToolId → String
   | .hello => "hello"
   | .check => "check"
+  | .search => "search"
 
 def toolInfo : ToolId → Tool
   | .hello =>
@@ -139,6 +150,26 @@ def toolInfo : ToolId → Tool
                 [ ("type", Json.str "string")
                 , ("description", Json.str "Optional. Lines prepended to both the candidate and the statement probes, typically `open` commands.") ]) ])
         , ("required", toJson [ "source" ]) ] }
+  | .search =>
+    { name := toolName .search
+      description :=
+        "Try the free tiers of the escalation ladder (rfl, simp, aesop_cat, exact?, …) \
+         against a goal. Every candidate is verified by the same kernel oracle as `check`, \
+         so a local success is trusted no more than a remote one. Use this before paying \
+         for a heavier prover."
+      inputSchema := Json.mkObj
+        [ ("type", Json.str "object")
+        , ("properties", Json.mkObj
+            [ ("goal", Json.mkObj
+                [ ("type", Json.str "string")
+                , ("description", Json.str "The statement to prove, as Lean source.") ])
+            , ("preamble", Json.mkObj
+                [ ("type", Json.str "string")
+                , ("description", Json.str "Optional. Lines prepended to the candidate, typically `open` commands.") ])
+            , ("maxTier", Json.mkObj
+                [ ("type", Json.str "integer")
+                , ("description", Json.str "Optional, default 1. 0 = fast discharge tactics only; 1 = also library search.") ]) ])
+        , ("required", toJson [ "goal" ]) ] }
 
 def tools : List Tool := allTools.map toolInfo
 
@@ -168,6 +199,8 @@ def handleTool (env : Lean.Environment) : (i : ToolMCP.Pos) → IO (ToolMCP.Dir 
   | ⟨.check, r⟩ =>
     Oracle.verify env
       { preamble := r.preamble, source := r.source, expected? := r.statement }
+  | ⟨.search, r⟩ =>
+    Tactics.search env r.preamble r.goal r.maxTier
 
 /-- **The server**, as an effectful section of the coproduct: the pure section embedded
 by `Section.toIO`, copaired with the registry's effectful one. -/
@@ -202,6 +235,11 @@ def parseArgs : (t : ToolId) → Option Json → Option (toolPoly t).Pos
     some { source := src
            preamble := (args.bind (·.getObjValAs? String "preamble" |>.toOption)).getD ""
            statement := args.bind (·.getObjValAs? String "statement" |>.toOption) }
+  | .search, args => do
+    let goal ← args.bind (·.getObjValAs? String "goal" |>.toOption)
+    some { goal := goal
+           preamble := (args.bind (·.getObjValAs? String "preamble" |>.toOption)).getD ""
+           maxTier := (args.bind (·.getObjValAs? Nat "maxTier" |>.toOption)).getD 1 }
 
 def decodeRequest (method : String) (params : Option Json) : Decoded :=
   match method with
@@ -243,6 +281,20 @@ def outcomeToJson : Oracle.Outcome → Json
   | .badStatement d => Json.mkObj
       [ ("outcome", Json.str "bad_statement"), ("diagnostic", Json.str d) ]
 
+def searchToJson : Tactics.Outcome → Json
+  | .solved tier tac axioms => Json.mkObj
+      [ ("outcome", Json.str "solved")
+      , ("tier", toJson tier)
+      , ("tactic", Json.str tac)
+      , ("axioms", toJson (axioms.map toString)) ]
+  | .unsolved tried => Json.mkObj
+      [ ("outcome", Json.str "unsolved")
+      , ("tried", toJson tried) ]
+
+def searchSummary : Tactics.Outcome → String
+  | .solved tier tac _ => s!"solved at tier {tier} by `{tac}`"
+  | .unsolved tried => s!"not solved by the {tried.length} free tactics tried — escalate"
+
 /-- One-line human summary, so a client that only renders `content` still sees the
 verdict rather than an opaque blob. -/
 def outcomeSummary : Oracle.Outcome → String
@@ -277,6 +329,8 @@ def encodeResult : (m : Method) → ResultOf m → Json
   | .inr ⟨.hello, _⟩, greeting => callToolJson greeting false none
   | .inr ⟨.check, _⟩, outcome =>
     callToolJson (outcomeSummary outcome) false (some (outcomeToJson outcome))
+  | .inr ⟨.search, _⟩, outcome =>
+    callToolJson (searchSummary outcome) false (some (searchToJson outcome))
 
 /-- The response for a tool name that is not in the registry: a successful call
 reporting an error, per MCP. -/

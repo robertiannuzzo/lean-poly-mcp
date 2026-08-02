@@ -20,29 +20,31 @@ being `rfl` and this file fails.
 
 example (r : CheckRequest) : ResultOf (.inr ⟨.check, r⟩) = Oracle.Outcome := rfl
 example (n : Option String) : ResultOf (.inr ⟨.hello, n⟩) = String := rfl
+example (r : SearchRequest) : ResultOf (.inr ⟨.search, r⟩) = Tactics.Outcome := rfl
 example : ResultOf (.inl .listTools) = List Tool := rfl
 
 /-! ## The pure server is still the lens -/
 
 example : (sectionEquiv PureMCP).toFun pureServer = pureHandle := pureDispatch_eq_handle
 
-#guard ((sectionEquiv PureMCP).toFun pureServer .listTools).length = 2
+#guard ((sectionEquiv PureMCP).toFun pureServer .listTools).length = 3
 
 /-! ## Pure dispatch -/
 
 #guard (pureHandle (.initialize "2025-06-18")).serverInfo.name = "lean-poly-mcp"
 #guard (pureHandle (.initialize "1999-01-01")).protocolVersion = "1999-01-01"
-#guard (pureHandle .listTools).map (·.name) = ["hello", "check"]
+#guard (pureHandle .listTools).map (·.name) = ["hello", "check", "search"]
 
 /-! ## Metadata derives from one enumeration
 
 Names, schemas and lookup all come from `allTools`, so the advertised registry and the
 dispatchable registry cannot drift apart. -/
 
-#guard allTools.map toolName = ["hello", "check"]
+#guard allTools.map toolName = ["hello", "check", "search"]
 #guard (tools.map (·.name)) = allTools.map toolName
 #guard toolOfName "check" = some .check
 #guard toolOfName "hello" = some .hello
+#guard toolOfName "search" = some .search
 #guard toolOfName "nope" = none
 
 /-! ## Argument parsing is dependent
