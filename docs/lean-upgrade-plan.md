@@ -1,406 +1,389 @@
-# Upgrade plan: `idris-mcp` → a Lean 4 / Poly autoformalization system
+# lean-poly-mcp — design and plan
 
-Status: **plan only, nothing implemented.** Written 2026-07-31.
+**Status: Phases 1–3 built and machine-checked. Phases 4–8 planned.**
+Revised 2026-08-01 for the Aristotle-only architecture. Supersedes the original
+`idris-mcp` upgrade plan.
 
-Seven requirements, in the user's words:
+Seven requirements:
 
-1. convert this project to Lean
-2. focus the autoformalization part on category theory
-3. involve containers, using **elements of Poly as tool calls**
+1. convert the project to Lean
+2. focus the autoformalization on category theory
+3. involve containers, using Poly as the structure of tool calls
 4. demonstrate agentic AI
 5. invoke the Aristotle API
 6. build a front end
 7. demonstrate understanding of Lean tactics
 
-The good news: these are not seven separate features bolted together. There is one
-idea that makes all seven the same project, and §1 is that idea. Everything after it
-is execution.
+These are not seven features. §1 is the single idea that makes them one project;
+everything after it is execution.
 
 ---
 
 ## 1. The organizing idea
 
-In **Poly** (the category of polynomial functors / containers), an object is
+In **Poly** — the category of polynomial functors, equivalently containers in the sense
+of Abbott–Altenkirch–Ghani — an object is
 
 ```
 p  =  Σ_{i : p.Pos}  y ^ p.Dir i
 ```
 
-Positions are requests; directions are the responses that request admits. The MCP
-interface is already exactly this, and the current Idris code already says so
-(`src/MCP/Container.idr:56`, `MCP = (m : Method) !> ResultOf m`). What the Idris
-version does *not* do is use the rest of the structure. That structure is where
-requirements 3, 4 and 7 come from, for free:
+Positions are requests; directions are the responses that request admits. An MCP
+interface *is* this. Once you say so, the rest of the system follows from the algebra
+instead of being designed separately:
 
-| Poly concept | What it is in this system |
+| Poly concept | What it is here |
 |---|---|
-| a **lens `p → y`** | **the server** — a section, `(i : p.Pos) → p.Dir i`; handles every request |
-| a **lens `y → p`** | **a request**, only — the backward map lands in `1`, so no response rides along |
-| the pair type `Σ (i : p.Pos), p.Dir i` | **one completed tool call** — request plus its response; *not* a hom-set |
-| a **lens `S y^S → p`** | **the agent** — a Moore machine; state, a request per state, a state update per response |
-| the **composite `S y^S → p → y`** | **one round-trip**, which is precisely a state transition `S → S` |
-| **coproduct `Σ_t p_t`** | **the tool registry** — adding a tool is taking a coproduct |
-| **composition `p ◁ q`** | **a two-step protocol** — "call this, then depending on what came back, call that" |
-| **cofree comonoid `𝒞_p`** | **the space of all sessions**; one agent run is a path through it |
-| **`p` for the tactic engine** | positions = proof states, directions = tactic outcomes (Hancock–Setzer interaction structures) |
+| a lens `p → y` | **the server** — a section, `(i : p.Pos) → p.Dir i` |
+| a lens `y → p` | **a request**, only — the backward map lands in `1`, so no response rides along |
+| `Σ (i : p.Pos), p.Dir i` | **one completed tool call** — request plus its response; *not* a hom-set |
+| a lens `S y^S → p` | **the agent** — a Moore machine |
+| the composite `S y^S → p → y` | **one round-trip**, which is exactly a state transition `S → S` |
+| coproduct `⊕'` | **the tool registry** — adding a family of tools is a coproduct |
+| composition `◁` | **a two-step protocol** |
+| cofree comonoid `𝒞_p` | **the space of all sessions**; one run is a path through it |
+| `p` for the tactic engine | positions = proof states, directions = tactic outcomes (Hancock–Setzer) |
 
-That last row is the one that earns requirement 7. Lean's tactic engine is itself an
-interaction structure — a polynomial. Proof search is an agent, i.e. a lens
-`S y^S → p_tactic`. So "demonstrate Lean tactics" and "demonstrate agentic AI" are
-the *same demo* viewed at two altitudes.
+That last row is what earns requirement 7. Lean's tactic engine is itself an interaction
+structure — a polynomial — so proof search is an agent, a lens `S y^S → p_tactic`.
+"Demonstrate tactics" and "demonstrate agentic AI" are the same demo at two altitudes.
 
-Two facts worth stating because they are one-liners in Lean and they make the
-mapping above a theorem rather than an analogy:
+Three facts license the table, all proved in `Poly/Basic.lean`, all **axiom-free**:
 
 ```lean
-Lens p y        ≃  ((i : p.Pos) → p.Dir i)   -- sections are servers
-Lens (S y^S) y  ≃  (S → S)                   -- so agent ∘ server is a state transition
+sectionEquiv : Lens p y        ≃ ((i : p.Pos) → p.Dir i)   -- sections are servers
+step/step_eq : Lens (S y^S) y  ≃ (S → S)                   -- agent ∘ server is a transition
+posEquiv     : Lens y p        ≃ p.Pos                     -- a lens out of y is a request
 ```
 
-**Done** — both are proved in `Poly/Basic.lean` (`sectionEquiv`, `step`, `step_eq`),
-axiom-free, as is `posEquiv : Lens y p ≃ p.Pos`. That third one is the correction to an
-earlier draft of this plan, which claimed `Lens y p ≃ Σ i, p.Dir i`. It does not: the
-backward map of a lens out of `y` lands in `y.Dir = 1` and carries no response. The
-"completed tool call" type is `Σ (i : p.Pos), p.Dir i`, which is not a hom-set. Worth
-recording the slip rather than quietly fixing it, since the whole point of §11 is that
-this project distinguishes what is checked from what merely sounds right.
+### Correction log
 
-### What Lean buys us that Idris could not
+Kept deliberately, because §10 is about distinguishing what is checked from what merely
+sounds right — and that discipline is worthless if this document quietly launders its
+own mistakes.
 
-This matters, because "port to another dependently typed language" is otherwise a
-lateral move. `src/MCP/Proof.idr:1-10` states the Idris limitation plainly: the
-elaborator is baked into the `idris2` binary, so "the typechecker is the oracle" had
-to be realized by *spawning a subprocess per candidate*. In Lean 4:
-
-- **The kernel is a library.** `import Lean` gives `Lean.Elab.runFrontend`, so a
-  candidate can be elaborated **in process** and the resulting `Environment`
-  inspected directly. The oracle stops being a shell-out.
-- **The soundness gate becomes real.** `src/MCP/Proof.idr:76-83` gates on a
-  *string grep* for `believe_me`, `assert_total`, etc. That is a blacklist, and
-  blacklists leak. Lean replaces it with `Lean.collectAxioms` — a kernel-level audit
-  of what the proof term actually depends on — accepted only if the axiom set is a
-  subset of `{propext, Classical.choice, Quot.sound}`. `sorryAx` present ⇒ reject.
-  This is the single biggest correctness upgrade in the whole plan, and it is worth
-  saying out loud in the writeup that v1's gate was weaker.
-- **JSON-RPC comes with the language.** `Lean.Data.JsonRpc` and `Lean.Data.Json`
-  (with `deriving ToJson, FromJson`) are in core, used by Lean's own LSP server.
-  `src/JSONRPC.idr` (181 lines, hand-written) mostly deletes.
-- **Mathlib.** `Mathlib.CategoryTheory.*` is the target vocabulary for requirement 2.
-  There is nothing comparable to formalize *into* on the Idris side.
-
-### One structural fix to carry over
-
-In v1, `vendor/container-compendium/mcp-demo/McpReal.idr` models the client as a real
-value of the compendium's dependent-lens type — and the README admits it is "not wired
-into the live transport." So the elegant part and the running part are two different
-programs. **In v2 they must be one program.** The Lean server's live dispatch *is* the
-section; the Lean agent *is* the lens; the trace the front end draws *is* the run. If
-that unification does not survive implementation, the paper claim weakens, so treat it
-as the primary architectural constraint, not a nicety.
+- **An earlier draft claimed `Lens y p ≃ Σ i, p.Dir i`** ("elements of Poly are tool
+  calls"). False: the backward map of a lens out of `y` lands in `y.Dir = 1` and carries
+  no response. `posEquiv` now proves the true statement, and the "completed tool call"
+  type is the pair type, which is not a hom-set at all. The replacement — `Lens (S y^S) y
+  ≃ (S → S)` — is stronger, and does the work the false claim was reaching for.
+- **An earlier draft budgeted for `leanprover-community/repl`** with pickled Mathlib
+  environments to make verification tractable. Unnecessary — see §4.
+- **An earlier draft said `sinhp/Poly` could not be a dependency.** That was true at the
+  toolchain we had then, and is false at the one we are moving to — see §3.
 
 ---
 
-## 2. Repo restructure
+## 2. Aristotle is the only external service
 
-Do not delete the Idris work — it is the strongest available evidence that the design
-is language-independent, and it's a genuine asset in the writeup.
+**Decision: no Anthropic API key, no LLM in the loop.** Aristotle covers both halves we
+would otherwise have needed a model for — `aristotle formalize` (English/LaTeX → Lean
+statement) and `aristotle submit` (fill `sorry`s). One vendor, one key, one failure mode.
+
+### Why this is a simplification, not a compromise
+
+**`sorry` is exactly the right interface.** Aristotle's contract is "hand me a file with
+`sorry`s and I'll fill them." Our Phase 3 oracle already audits axioms with
+`Lean.collectAxioms` — so **`sorryAx` absent is literally "Aristotle honoured its
+contract."** The soundness gate and the completion check are the same check.
+
+**The trust boundary gets crisper.** Aristotle is purely the untrusted proposer; we are
+purely the verifier and orchestrator. Nothing blurs the line.
+
+**Statement matching matters more, and we have it.** `formalize` performs the
+English→Lean step, which is precisely where misformalization lives. The two-probe check
+(§4) is aimed at exactly that.
+
+### The agent is still agentic
+
+Removing the LLM appears to remove the agent. It does not — it relocates the decision
+from a prompt into a verified policy. The agent's job is choosing where to spend on an
+escalation ladder:
 
 ```
-CLAUDE CONTAINERS/
-  lean-poly-mcp/              ← new Lake project, the real repo now
-    Poly/                     Poly kernel + proofs
-    Mcp/                      server, transport, tools
-    Oracle/                   kernel oracle + axiom audit
-    Formalize/                category-theory autoformalization
-    Agent/                    the lens-driven agent
-    Aristotle/                Harmonic client (Python side-process)
-    web/                      front end
-    test/
-    lakefile.toml, lean-toolchain
-  idris-mcp/                  ← preserved, README retitled "v1 (Idris2)"
+tier 0   rfl / simp / aesop_cat            free, milliseconds, local
+tier 1   exact? / apply? library search    free, seconds, local
+tier 2   Aristotle                         paid, minutes to hours
 ```
 
-Toolchain: pin `lean-toolchain` to whatever Mathlib's current release requires, and
-resolve `sinhp/Poly` against it (see §3 risk note).
+That is autonomous, multi-step, feedback-driven tool use — and the agent remains a
+`Lens (S y^S) MCP` **written in Lean**, not an external client. This is strictly the best
+outcome for requirements 3 and 4 together, and it fuses 4 with 7: the ladder *is* the
+tactics demo.
+
+**Stated honestly:** if "agentic AI" is read as "an LLM makes the decisions", this design
+puts the decisions in a Lean policy and calls an AI system (Aristotle) as a tool. That is
+a shift in interpretation and should be presented as one. Adding a second proposer later
+is `⊕'` on the interface — no redesign.
+
+### What this removes
+
+`ANTHROPIC_API_KEY`; the LLM proposer and its system prompt; the bounded repair loop;
+v1's `paraphrase` disclosure hack (statement matching supersedes it); one of the two
+cost-cap regimes in `CLAUDE.md`.
 
 ---
 
-## 3. Phase 1 — the Poly kernel
+## 3. Toolchain: pin to Aristotle's
 
-**Decision to make first: vendor vs depend.**
+Aristotle runs on fixed versions:
 
-- [`sinhp/Poly`](https://github.com/sinhp/Poly) (Awodey/Hazratpour) is the serious
-  Lean 4 formalization — LCCCs, Beck–Chevalley, univariate and multivariate
-  polynomial functors, composition, monoidal and bicategory structure. It currently
-  pins `v4.28.0-rc1`.
-- `Mathlib.Data.PFunctor.Univariate.Basic` is `PFunctor` = container `(A, B : A → Type)`,
-  with W-types. Small, stable, already a Mathlib dependency.
+```
+lean-toolchain   leanprover/lean4:v4.28.0
+mathlib          8f9d9cff6bd728b17a24e163c9402775d9e6a365   (= tag v4.28.0, 2026-02-16)
+```
 
-Recommendation: **write a small self-contained `Poly/` (~300 lines) and connect it to
-both.** The self-contained version is what the server compiles against (fast, no
-version risk, and it is the part we want to *show*); then add `Poly/Bridge.lean`
-proving it agrees with `PFunctor`, and optionally a `sinhp/Poly` comparison behind a
-lake feature flag. This exactly mirrors the v1 strategy of vendoring a patched slice
-of container-compendium, which worked.
+We are currently on `v4.33.0-rc1` with Mathlib pinned to `master` — **4980 commits
+ahead** of Aristotle's. Both are wrong, for reasons beyond compatibility warnings:
 
-Contents:
+**The trust story requires it.** Phase 5's discipline is *never trust Aristotle's claim of
+verification — re-check it locally*. That only works if both sides speak the same Mathlib.
+Under version skew, a failed re-verification is ambiguous: unsound, or a lemma renamed
+across 4980 commits? An ambiguous verdict from the oracle destroys the thing the oracle
+exists to provide. Handing Aristotle a separate pinned subproject does not help — it moves
+the skew into the one place we cannot afford it.
+
+**We are on a release candidate.** Nobody pins an rc. Moving to `v4.28.0` also gets
+Mathlib off `master`, which is a moving target and bad for reproducibility regardless.
+
+**It makes `sinhp/Poly` usable.** Poly pins `v4.28.0-rc1` — the same release line. The
+toolchain Harmonic requires and the toolchain the serious Poly formalization targets are
+the same one. Keep the vendored kernel as the thing the server compiles against (small,
+readable, no version risk), and add `sinhp/Poly` as an optional comparison rather than
+writing it off.
+
+**Risk to verify by trying:** the oracle depends on `Lean.Elab.process`'s signature and on
+`importModules (loadExts := true)`. `loadExts` is load-bearing — without it the
+environment cannot parse `n + 0`. If it is absent at 4.28 there is another route, but this
+is the item most likely to bite. `collectAxioms` and `enableInitializersExecution` are
+long-standing and safe. Cost is one-time and unattended: a toolchain download and a fresh
+Mathlib olean cache.
+
+---
+
+## 4. What is built (Phases 1–3)
+
+### Poly kernel — `Poly/`
+
+Objects, dependent lenses, `⊕' × ⊗ ◁`, sections, agents, traces. Deliberately
+Mathlib-free: **typechecks standalone in 1.7s**. The category laws hold by `rfl`, so no
+coherence bookkeeping leaks into anything above.
+
+`#print axioms` on every result: *"does not depend on any axioms"* — stronger than the
+whitelist requires.
+
+`Poly/Kleisli.lean` names the one place the pure statement stops being exact: a handler
+that runs the elaborator is `(i : p.Pos) → IO (p.Dir i)`, which is **not** a `Lens p y` —
+it is a section in the Kleisli category of `IO`. Given a name and a file rather than a
+footnote, because `Lens p y` would otherwise quietly overclaim.
+
+### MCP server — `Mcp/`
+
+`Method` as positions, `ResultOf` as directions, the server as a section. Transport is
+newline-delimited JSON-RPC on `Lean.JsonRpc` — deliberately *not* LSP framing, which
+prefixes `Content-Length` headers MCP does not use. v1's hand-written 181-line
+`JSONRPC.idr` has no counterpart.
+
+The structural fix from v1 holds: `Mcp.respond` answers live requests by projecting the
+lens through `sectionEquiv`, and `dispatch_eq_handle` proves that equals the handler by
+`rfl`. One source of truth, no runtime cost. In v1 the dependent-lens model and the
+program that ran were two different artifacts.
+
+With the oracle added, `MCP` became a genuine coproduct:
 
 ```lean
-structure Poly where
-  Pos : Type
-  Dir : Pos → Type
-
-structure Lens (p q : Poly) where
-  onPos : p.Pos → q.Pos
-  onDir : (i : p.Pos) → q.Dir (onPos i) → p.Dir i
+abbrev MCP : Poly := PureMCP ⊕' OracleMCP
 ```
 
-then: `id`, `comp`, category laws; `y`, `𝟘`, `𝟙`; coproduct `+`, product `×`,
-Dirichlet `⊗`, composition `◁`; the two equivalences from §1; `Category Poly` instance
-so Mathlib's category-theory machinery applies. Cofree comonoid `𝒞_p` last — it is the
-hardest and the front end only needs the *tree*, which can be defined directly.
+which is what lets the pure claim survive intact on the summand where it is true, instead
+of being weakened everywhere. The coproduct is load-bearing here, not decorative.
 
-**Risk:** `sinhp/Poly` toolchain may not match Mathlib's. Mitigation is the vendored
-kernel above; the dependency is then optional rather than load-bearing.
+Verified end to end against the compiled binary: initialize, tools/list, tools/call,
+unknown tool (`isError`, not a protocol error), malformed params (`-32602`), unknown
+method (`-32601`), notification producing no response. v1's Python GUI drives the Lean
+binary **unchanged**.
 
----
+### Oracle — `Oracle/`
 
-## 4. Phase 2 — the MCP server in Lean
+Three gates: elaborate → audit axioms → match statement.
 
-Port `src/MCP/{Types,Container,Transport}.idr`, `src/{Server,JSONRPC}.idr`.
-
-```lean
-inductive Method where
-  | initialize (protocolVersion : String)
-  | listTools
-  | callTool (name : String) (args : Json)
-  | check (decl : String)
-  | prove (prompt : String)
-  ...
-
-abbrev ResultOf : Method → Type
-  | .initialize _ => InitializeResult
-  ...
-
-def MCP : Poly := ⟨Method, ResultOf⟩
-
-def server : Lens MCP y          -- ← the section; exhaustiveness is the kernel's job
-```
-
-The v1 compile-time-safety demo (README §"The compile-time safety demo") ports
-directly and gets *better*: keep a `docs/negative-examples.lean` with the wrong-shape
-handler commented out and the actual Lean error text pasted beneath it.
-
-Transport: `Lean.Data.JsonRpc` over stdio, same newline-delimited framing the Python
-GUI already speaks, so `gui/server_gui.py`'s bridge logic survives the port.
-
----
-
-## 5. Phase 3 — the oracle
-
-`Oracle/Kernel.lean`:
-
-1. `elaborate (src : String) : IO (Environment ⊕ Diagnostics)` via `Lean.Elab.runFrontend`.
-2. `auditAxioms (env) (declName) : Except String Unit` via `Lean.collectAxioms`,
-   whitelist `{propext, Classical.choice, Quot.sound}`, explicit `sorryAx` rejection.
-3. Reject `unsafe`, `partial`, `native_decide`, `@[implemented_by]`, and `macro`/`elab`
-   in candidate source — not as the primary gate (the axiom audit is) but as defense
-   in depth.
-4. Confirm the elaborated statement is **α-equivalent to the goal we asked for** — v1
-   could not do this and the README documents the consequence honestly (the model
-   silently proved the *negation* of a false prompt and reported `checked`). In Lean,
-   separating "statement file" from "proof file" and comparing types makes that class
-   of misformalization *checkable*, not just disclosable. Keep the `paraphrase` field
-   anyway; belt and braces.
-
-Keep v1's evidence-carrying `ProofResult` (`Checked / Refuted / Unknown / ParseErr`) —
-its distinction between "this candidate failed" and "we ran out of attempts" is
-correct and unusually careful. Add `axioms : List Name` to `Checked`.
-
-**Performance — resolved, and more cheaply than planned.** This section proposed running
-[`leanprover-community/repl`](https://github.com/leanprover-community/repl) as a side
-process with pickled environments. That turned out to be unnecessary. `Lean.Elab.process`
-takes an existing `Environment` and returns the new one plus the message log, so Mathlib
-is imported **once, in-process**, and every candidate reuses it:
+Elaboration is **in-process** via `Lean.Elab.process`, against an environment imported
+once at startup:
 
 ```
 [64588 ms] import Mathlib (ONCE, at startup)
-   [138 ms] first category-theory candidate
-    [17 ms] .. subsequent candidates
-     [4 ms] .. a rejected one
+   [138 ms] identity is a left unit for ≫          → checked [propext]
+    [17 ms] iso hom ≫ inv = id, statement matched  → checked [propext]
+    [24 ms] functors preserve retractions          → checked []
+     [4 ms] ATTACK: sorry in a Mathlib proof       → unsoundAxioms [sorryAx]
 ```
 
-No subprocess, no IPC, no pickling, no external dependency. Startup cost is real and is
-paid once; `Mcp/Main.lean` takes the import set as an argument so `Init`-only runs start
-instantly for tests.
+No subprocess, no IPC, no external REPL. Two results worth recording:
+
+- **`sorry` is only a warning** to the elaborator, so it passes gate 1 cleanly. It is
+  caught solely by the audit — a system gating on "did it compile" accepts it.
+- **`native_decide` mints a per-declaration axiom** (`cand._native.native_decide.ax_1`)
+  whose name varies with the declaration. A name-based gate would need a name it cannot
+  know in advance. Nothing in `Oracle/Kernel.lean` mentions `native_decide`. This is the
+  concrete argument for auditing over v1's substring blacklist.
+
+Statement matching is **two probes, not one**: first, is the requested statement
+well-formed here; only then, does the candidate inhabit it. Found by hitting it — the
+first implementation reported `statementMismatch` on a *correct* Mathlib proof because
+`open CategoryTheory in` does not scope across `process` calls. Conflating a harness bug
+with "the prover proved the wrong thing" is exactly the false confidence this module
+exists to prevent, hence `badStatement` as a distinct outcome and `Request.preamble`.
+
+v1's live failure is now caught rather than disclosed: asked for `∀ n, n = n + 1` and
+given a proof of its negation, the oracle returns `statementMismatch` with the type
+mismatch verbatim.
 
 ---
 
-## 6. Phase 4 — category-theory autoformalization
+## 5. Phase 4 — tools, not methods
 
-Retarget `prove` from "arbitrary Nat lemmas" to `Mathlib.CategoryTheory`. A graded
-benchmark set, easiest first — this doubles as the eval harness:
+`check` is currently a top-level JSON-RPC method, following v1. **That is wrong for any
+standards-compliant MCP client**, which discovers only `tools/list` and calls
+`tools/call` — it never sees a custom method. v1's design quietly locked it to a
+hand-written client.
 
-- **Tier 0 (must pass):** identity/associativity in a given category; functors preserve
-  isomorphisms; a natural transformation's naturality square; uniqueness of inverses.
-- **Tier 1:** Yoneda-adjacent statements; limits/colimits as universal properties;
-  adjunction unit/counit triangle identities.
-- **Tier 2 (our home turf):** statements *about Poly itself* — `Lens` composition is
-  associative; `◁` is monoidal with unit `y`; `Lens y p ≃ Σ i, p.Dir i`. These are the
-  showpiece: the system proves theorems about the very structure it is built from.
+Move the oracle surface into `tools`:
 
-Tier 2 is the answer to "why category theory *here*" and it is what makes the project
-self-referential in a way that reads as design rather than decoration.
+| tool | does |
+|---|---|
+| `check` | verify a declaration: elaborate, audit, match |
+| `search` | run the free tactic ladder (tier 0/1) |
+| `aristotle_submit` / `aristotle_status` / `aristotle_fetch` | the paid tier, job-based |
 
----
-
-## 7. Phase 5 — Aristotle
-
-[`aristotlelib`](https://pypi.org/project/aristotlelib/) (Python ≥3.10),
-`ARISTOTLE_API_KEY`, keys from `aristotle.harmonic.fun/dashboard/keys`. CLI:
-`aristotle submit "<prompt>" --project-dir <dir> [--wait]`, `aristotle formalize
-paper.tex`, `aristotle list`, `aristotle download <id>`.
-
-**Critical design constraint: Aristotle is slow.** The published case study reports an
-~8 hour run on a hard formalization. So:
-
-- **Never block a tool call on it.** Model it as a job: `aristotle/submit` returns a
-  job id; `aristotle/status`, `aristotle/fetch` poll. In Poly terms the submit
-  position's direction is a *job handle*, not a proof — and that is a nice, honest
-  illustration of why the direction type is dependent on the position.
-- **Re-verify everything locally.** Aristotle's output goes through *our* Phase 3
-  oracle — elaborate, axiom-audit, statement-match — before it is ever labelled
-  `checked`. The vendor's assertion of verification is an input, not evidence. Say
-  this explicitly in the README; it is the same discipline v1 applied to the LLM.
-- Two proposers, one oracle: `prove` (LLM, fast, cheap, from v1) and
-  `prove_aristotle` (slow, strong). Comparing them on the Phase 4 benchmark is a
-  genuine result to report.
-
-**Risk:** paid key, unknown rate limits, and an 8-hour worst case means the demo needs
-pre-warmed cached results. Plan for a `--replay` mode backed by stored job outputs.
+The registry is already `⊕'`, so this is adding a summand rather than editing an
+inductive type. Drop `hello`.
 
 ---
 
-## 8. Phase 6 — tactics
+## 6. Phase 5 — Aristotle
 
-Four levels, so "demonstrates understanding of tactics" is shown rather than claimed:
+Client via the `aristotle` CLI shelled out from Lean (`IO.Process`), so the vendor SDK is
+the only non-Lean dependency. `ARISTOTLE_API_KEY`.
 
-1. **Use them well.** The Phase 1 proofs should read idiomatically — `ext`, `funext`,
-   `aesop_cat`, `simp` with a curated `@[simp]` set on `Lens`, `induction ... with`.
-   `aesop_cat` in particular is the Mathlib category-theory discharge tactic; using it
-   correctly is itself a signal.
-2. **Write one.** A custom `poly_ext` tactic (Lean metaprogramming: `elab` /
-   `macro_rules`) that reduces a `Lens` equality to `onPos` and `onDir` goals,
-   handling the dependent-`HEq` obligation that makes this annoying by hand. Small,
-   genuinely useful in Phase 1, and unfakeable.
-3. **Expose them.** MCP tools `tactic/state` and `tactic/apply` backed by the REPL's
-   `proofState` mode. Now the tactic engine is a polynomial the agent can drive:
-   positions = proof states, directions = outcomes.
-4. **Fail informatively.** A `docs/tactic-notes.lean` of worked failures — where
-   `simp` loops, why `decide` won't close a `Type`-level goal, what `native_decide`
-   costs you in trust (it is excluded from the whitelist for a reason).
+**Never blocking.** Published runtimes reach ~8 hours. `aristotle_submit` returns a job
+handle; `status`/`fetch` poll. In Poly terms the submit position's direction is a *job
+handle*, not a proof — a clean illustration of why the direction type depends on the
+position.
 
----
+**Always re-verified.** Aristotle's output goes through the Phase 3 oracle before it is
+ever labelled `checked`. The vendor's assertion of verification is an input, not evidence.
 
-## 9. Phase 7 — the agent
+**We submit our own project.** Because the toolchain matches, Aristotle sees
+`Poly/Basic.lean` — so it can prove theorems *about our own kernel*, which is what makes
+Tier 2 below real rather than aspirational.
 
-`Agent/` — an agent is `Lens (S y^S) MCP`, defined in Lean, and *the runtime executes
-that value* (see the §1 structural fix).
-
-```lean
-structure AgentState where
-  goal      : String
-  attempts  : List Attempt
-  proofState: Option ProofStateId
-  phase     : Phase
-
-def prover : Lens (AgentState.poly) MCP
-```
-
-The loop: pick a request from the state (`onPos`), receive the response, update
-(`onDir`). Strategy inside `onPos`: try `check` on cached lemmas → `tactic/apply`
-search → `prove` (LLM) → `prove_aristotle` on the ones that survive. Every step is
-logged as a node in the session tree, i.e. a path in `𝒞_MCP`. That log is the front
-end's data model, which is why the front end is not decoration either.
-
-Multi-agent, if time allows: a *proposer* agent and an *auditor* agent that only ever
-reads axiom sets and statement-matching results. The auditor's inability to propose
-is a type-level fact, not a prompt instruction.
+**Mandatory in code, not by convention:** hard attempt cap; `--replay` mode backed by
+cached job outputs so demos and tests never hit the network; no retry-on-timeout without
+a ceiling.
 
 ---
 
-## 10. Phase 8 — front end
+## 7. Phase 6 — category theory, graded
 
-Replace the 198-line stdlib GUI with something that shows the mathematics. Backend
-stays thin (the existing Python bridge in `gui/server_gui.py` already speaks exactly
-the right protocol and can be extended); the UI is where the work goes.
+The benchmark doubles as the eval harness.
 
-Four panels:
+- **Tier 0** — identity and associativity laws, functors preserve isomorphisms,
+  naturality squares. Mostly `aesop_cat`; expected to need no network at all.
+- **Tier 1** — Yoneda-adjacent statements, universal properties, triangle identities.
+- **Tier 2** — statements about **`Poly` itself**: `Lens` composition is associative, `◁`
+  is monoidal with unit `y`, `sectionEquiv`. The system proves theorems about the
+  structure it is built from, verified by its own kernel.
 
-1. **Polynomial explorer** — the server's `p`: positions listed, directions per
-   position, live. Adding a tool visibly changes the coproduct.
-2. **Session tree** — the agent's run drawn as a path through `𝒞_p`. Branches the
-   agent considered and abandoned shown greyed. This is the picture that makes the
-   categorical story legible to someone who does not want to read Lean.
-3. **Proof panel** — statement, candidate, kernel verdict, **axiom set**, and
-   statement-match result. The axiom list is the trust story; make it prominent.
-4. **Aristotle queue** — submitted jobs, elapsed time, and local re-verification
-   status shown *separately* from Harmonic's own claim.
-
-Recommend a single self-contained page (no build step, no CDN) over a React app —
-it stays reviewable, it can be published as an Artifact for sharing, and the audience
-for this is researchers, not consumers.
+**How far tier 0/1 gets with no network is itself a result worth reporting** — it bounds
+what the paid tier is actually for.
 
 ---
 
-## 11. What to claim, and what not to
+## 8. Phase 7 — tactics
 
-Given this may be read by people who work on container theory, the writeup should be
-scrupulous about the boundary. Verified claims and marketing claims must not be
-adjacent in the same sentence.
+Four levels, so the understanding is shown rather than claimed:
 
-**Can claim, because the kernel checks it:**
-- The MCP interface is a polynomial functor; the server is a section of it; the agent
-  is a lens into it; exhaustiveness and result-shape correctness are kernel facts.
-- Every returned proof elaborated under Lean's kernel and depends only on
+1. **Use them well** — `ext`, `funext`, `aesop_cat`, a curated `@[simp]` set on `Lens`.
+2. **Write one** — `poly_ext`, reducing a `Lens` equality to `onPos`/`onDir` goals and
+   handling the dependent `HEq` obligation. (Note: `sectionEquiv`/`posEquiv` closed by
+   `rfl` thanks to `PUnit` eta, so this is needed for the harder lemmas, not the ones
+   already done.)
+3. **Expose them** — `tactic/state` and `tactic/apply`, making the tactic engine a
+   polynomial the agent drives.
+4. **Fail informatively** — `docs/tactic-notes.lean`: where `simp` loops, why
+   `native_decide` is excluded from the whitelist, what `decide` cannot close.
+
+---
+
+## 9. Phases 8–9 — the agent, and the front end
+
+The agent is `Lens (S y^S) MCP`, defined in Lean, executing the escalation ladder from §2.
+Every step is a node in the session tree — a path in `𝒞_MCP` — which is the front end's
+data model, so the front end is not decoration either.
+
+Four panels, one self-contained page (no build step, no CDN — reviewable, and shareable
+as an artifact):
+
+1. **Polynomial explorer** — positions and directions of the live server; adding tools
+   visibly changes the coproduct.
+2. **Session tree** — the run as a path through `𝒞_p`, with abandoned tier-0/1 branches
+   greyed. The picture that makes the categorical story legible without reading Lean.
+3. **Proof panel** — statement, term, **axiom set**, match result, and which tier solved
+   it. The axiom list is the trust story; keep it prominent.
+4. **Aristotle queue** — jobs, elapsed time, and local re-verification shown *separately*
+   from Harmonic's own claim.
+
+---
+
+## 10. What is claimed, and what is not
+
+Stated precisely, because the distinction is the point of the project.
+
+**Kernel-checked:**
+- The MCP interface is a polynomial functor; the server is a section of it; exhaustiveness
+  and result-shape correctness are kernel facts.
+- Every accepted proof elaborates and depends only on
   `{propext, Classical.choice, Quot.sound}` — with the axiom list shown.
-- The returned theorem's statement matches the requested statement up to α-equivalence.
+- The proved statement is α-equivalent to the statement requested.
 
-**Must not claim:**
-- That the *English prompt* was proven. It was not; a statement was proven, and the
-  formalization step is unverified in principle. v1's README is exemplary on this
-  (the `n = S n` incident) — carry that section forward, updated.
-- That the running server "is" a morphism in Poly in a mechanized sense. It is
-  *specified* as one in Lean and the Lean value is what executes; there is no
-  mechanized bridge between the Lean semantics and the compiled binary's IO behaviour.
-  State it that way.
-- Novelty for the correspondence itself. Containers ≅ polynomial functors
-  (Abbott–Altenkirch–Ghani), interaction structures (Hancock–Setzer), and dynamical
-  systems as lenses (Niu–Spivak) are established. The contribution here is that a
-  *working system* is built on them, not the theory.
+**Design discipline, not theorem:**
+- The agent policy is a Lean value that the runtime executes. There is no mechanized
+  bridge from the Lean semantics to the compiled binary's IO behaviour.
+
+**Not claimed:**
+- That an **English** prompt was proven. Formalization is unverified in principle, and
+  `aristotle formalize` performing that step is exactly why statement matching exists.
+- Novelty for the theory. Containers ≅ polynomial functors (Abbott–Altenkirch–Ghani),
+  interaction structures (Hancock–Setzer), and systems as lenses (Niu–Spivak) are
+  established. The contribution is a working system built on them.
+
+**Where Poly is currently doing least work:** at Phase 2, with one tool, the job was done
+by `ResultOf : Method → Type` — obtainable without ever saying "polynomial functor". It
+starts earning its place in Phases 4–9, where the registry (`⊕'`), multi-step protocols
+(`◁`), the session log (`𝒞_p`), and the tactic engine all come from one algebra rather
+than four ad-hoc designs. If by Phase 9 it still is not carrying weight, the right move is
+to say so, not to dress it up.
 
 ---
 
-## 12. Suggested order
+## 11. Risks
 
-Phases 1 → 2 → 3 are the spine and must land in that order; nothing else is
-demonstrable without them. After that: 6 (tactics) and 4 (category theory) together,
-since the Tier-2 benchmark *is* the Phase 1 proof set. Then 7 (agent), then 8 (front
-end), with 5 (Aristotle) slotted in whenever the API key exists — it is the most
-externally-blocked item and the least structurally coupled, so it should never be on
-the critical path.
+| risk | mitigation |
+|---|---|
+| `loadExts` / `Lean.Elab.process` differ at v4.28 | Verify by building; the oracle is 250 lines and easy to adapt |
+| Aristotle latency (~8h worst case) | Job-based, never blocking; `--replay` for demos and tests |
+| Aristotle cost, unknown rate limits | Hard caps in code; tiers 0/1 free and local; decide a spend ceiling before Phase 5 |
+| Mathlib 5.5 months behind current | Accepted deliberately — see §3 |
+| Context/session cost while building | `CLAUDE.md` rules; `./scripts/check.sh`; fresh session per phase |
 
-Highest-risk items, watch early: Mathlib/`sinhp-Poly` toolchain alignment (§3), REPL
-environment-pickling performance (§5), and Aristotle latency (§7).
+---
 
-## Sources
+## 12. Order
 
-- [Aristotle API — Harmonic (support overview)](https://eco.com/support/en/articles/14114345-what-is-the-harmonic-aristotle-api-formal-verification-ai-for-developers)
-- [`aristotlelib` on PyPI](https://pypi.org/project/aristotlelib/)
-- [Using the Aristotle API for AI-Assisted Theorem Proving in Lean 4 (arXiv)](https://arxiv.org/html/2605.20120v1)
-- [`sinhp/Poly` — Lean 4 formalization of polynomial functors](https://github.com/sinhp/Poly)
-- [`Mathlib.Data.PFunctor.Univariate.Basic`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Data/PFunctor/Univariate/Basic.html)
-- [`Lean.Data.JsonRpc`](https://leanprover-community.github.io/mathlib4_docs/Lean/Data/JsonRpc.html)
-- [`leanprover-community/repl`](https://github.com/leanprover-community/repl)
-- [Validating a Lean Proof — Lean reference manual](https://lean-lang.org/doc/reference/latest/ValidatingProofs/)
-- [Did you prove it? — leanprover-community](https://leanprover-community.github.io/did_you_prove_it.html)
+**4** (tools not methods) → **3′** (toolchain downgrade + full re-verification) → **6/7**
+(benchmark and tactics together — Tier 2 *is* the Poly proof set) → **8** (agent) → **5**
+(Aristotle, whenever the key exists) → **9** (front end).
+
+The toolchain move should happen early, before there is more code to revalidate. Aristotle
+stays off the critical path as long as possible: it is the most externally blocked item,
+and tiers 0/1 make the system demonstrable without it.

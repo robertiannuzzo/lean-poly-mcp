@@ -4,7 +4,7 @@ import Lean
 # The oracle
 
 The only trusted component in the system. Everything that *produces* candidate proofs
-— an LLM, Aristotle, a tactic search — is untrusted; this module decides what counts
+— Aristotle, a tactic search — is untrusted; this module decides what counts
 as established.
 
 Three gates, in order:
@@ -22,9 +22,13 @@ Three gates, in order:
    A blacklist only catches the escape hatches someone thought to list; the audit
    catches every one, including those introduced *indirectly*. `sorry` is the clearest
    case: it emits a **warning**, not an error, so gate 1 passes it happily — and it is
-   caught here because it leaves `sorryAx` in the axiom set. `native_decide` is
-   another: it is caught without being named anywhere in this file, because it
-   introduces `Lean.ofReduceBool`.
+   caught here because it leaves `sorryAx` in the axiom set.
+
+   `native_decide` is the sharper example. Measured on this toolchain it mints a
+   *per-declaration* axiom — `cand._native.native_decide.ax_1` — whose name varies with
+   the declaration being proved. A name-based gate would need a name it cannot know in
+   advance; the whitelist needs to know nothing, and `native_decide` is named nowhere in
+   this file.
 
 3. **Statement match.** Elaboration proving *something* is not the same as proving
    what was asked. The check is `example : <requested> := <declName>`, which succeeds

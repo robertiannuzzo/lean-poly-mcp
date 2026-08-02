@@ -44,21 +44,32 @@ into one program and run it once — do not iterate one candidate at a time.
 Every subagent starts cold and re-derives context this session already has. Do the work
 inline. (Only exception: the user explicitly asks.)
 
-## Caps are mandatory in Phases 4–5
+## Aristotle is the only external service
 
-`Formalize/` and `Aristotle/` call **separately billed** APIs (`ANTHROPIC_API_KEY`,
-`ARISTOTLE_API_KEY`) — these do not touch Claude Code usage, but they do cost money and
-they are the real runaway risk, because a repair loop is by construction a loop.
+**There is no LLM in this project and no `ANTHROPIC_API_KEY`.** Aristotle does both the
+formalization (`aristotle formalize`) and the proving (`aristotle submit`); the agent is a
+Lean policy, not a prompt. If you find yourself reaching for a model API, that is a design
+change — raise it, don't add it. See `docs/lean-upgrade-plan.md` §2.
+
+`ARISTOTLE_API_KEY` is **separately billed** — it does not touch Claude Code usage, but it
+costs money and is the real runaway risk, because an escalation loop is by construction a
+loop.
 
 Anything that calls out must have, in code and not by convention:
 
 - a hard attempt cap (v1 used 3; keep it)
-- a `--dry-run` / replay mode backed by cached responses, so demos and tests never hit
-  the network
-- Aristotle submissions job-based, never blocking; runs of ~8h are documented
+- a `--replay` mode backed by cached job outputs, so demos and tests never hit the network
+- submissions job-based, never blocking; runs of ~8h are documented
 - no retry-on-timeout without a ceiling
 
-Write the cap before the call, not after.
+Write the cap before the call, not after. Tiers 0 and 1 (`aesop_cat`, `exact?`) are free
+and local — exhaust them before spending.
+
+## Toolchain is pinned to Aristotle's, deliberately
+
+`leanprover/lean4:v4.28.0` and Mathlib `8f9d9cff` (tag `v4.28.0`). Do **not** bump either
+to chase a newer Mathlib: re-verifying Aristotle's output locally is the whole trust story,
+and it only works if both sides speak the same Mathlib.
 
 ## Session hygiene
 

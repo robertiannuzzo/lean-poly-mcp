@@ -6,5 +6,5 @@ state, `onDir` folds the response back into a new state. Running it is iterating
 lens against the server's section, and the resulting session is a path through the
 cofree comonoid `𝒞_MCP` — which is exactly the data the front end draws.
 
-Not yet implemented — see `docs/lean-upgrade-plan.md` §9.
+Not yet implemented — see `docs/lean-upgrade-plan.md` §9 — the escalation ladder in §2.
 -/
