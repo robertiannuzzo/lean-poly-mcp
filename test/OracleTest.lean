@@ -50,11 +50,11 @@ def cases : List Case :=
 
   , { name := "ATTACK: native_decide"
       source := "theorem cand : (List.range 10).length = 10 := by native_decide"
-      -- Observed on v4.33.0-rc1: this mints a *per-declaration* axiom,
-      -- `cand._native.native_decide.ax_1`, rather than the `Lean.ofReduceBool` one
-      -- might expect. Which is precisely the argument for auditing rather than
-      -- blacklisting: a name-based gate would have to know that name in advance, and
-      -- it varies with the declaration. The whitelist needs to know nothing.
+      -- What this leaves behind is not stable across toolchains: v4.28.0 (our pin)
+      -- gives `Lean.ofReduceBool` + `Lean.trustCompiler`, while v4.33.0-rc1 minted a
+      -- per-declaration axiom named after the declaration itself. Hence the prefix-only
+      -- assertion — and hence auditing rather than blacklisting, since a name-based gate
+      -- would need names that vary with both declaration and toolchain.
       expect := "unsoundAxioms: " }
 
   , { name := "ATTACK: home-made axiom"
@@ -76,7 +76,7 @@ def cases : List Case :=
 
   , { name := "whitelisted classical reasoning is fine"
       source := "theorem cand : ∀ p : Prop, p ∨ ¬p := fun p => Classical.em p"
-      expect := "checked (axioms: [propext, Classical.choice, Quot.sound])" }
+      expect := "checked (axioms: [Classical.choice, Quot.sound, propext])" }
   ]
 
 def main : IO UInt32 := do

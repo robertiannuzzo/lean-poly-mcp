@@ -8,6 +8,8 @@ ever trusted.
 > server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
 > verifies candidates against Mathlib in milliseconds. The autoformalization
 > benchmark, tactics, the agent, Aristotle, and the front end are not written yet.
+> **Aristotle is the only external service** — there is no LLM and no
+> `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
 > See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
 > [`v1-idris/`](v1-idris/) for the Idris2 predecessor this is derived from.
 
@@ -71,8 +73,9 @@ incidental, and Lean removes them:
 - **The oracle had to be a subprocess.** Idris2's elaborator lives inside the `idris2`
   binary, so v1 spawned a compiler per candidate
   ([`v1-idris/src/MCP/Proof.idr`](v1-idris/src/MCP/Proof.idr)). Lean's kernel is a
-  library — `import Lean` gives `Lean.Elab.runFrontend`, and candidates elaborate
-  in-process.
+  library — `import Lean` gives `Lean.Elab.process`, which takes an existing
+  `Environment` and returns the new one plus the message log, so candidates elaborate
+  in-process against an environment imported once.
 - **The soundness gate was a string grep.** v1 rejects candidates containing
   `believe_me`, `assert_total`, `unsafePerformIO` and friends by substring search — a
   blacklist, and blacklists leak. Lean replaces it with `Lean.collectAxioms`: a
@@ -102,15 +105,17 @@ The audit is the part that matters. It is not a list of banned words — it is
 | attack | verdict |
 |---|---|
 | `by sorry` | `unsoundAxioms [sorryAx]` — note `sorry` is only a *warning* to the elaborator, so it sails through gate 1 |
-| `by native_decide` | `unsoundAxioms [cand._native.native_decide.ax_1]` |
+| `by native_decide` | `unsoundAxioms [Lean.ofReduceBool, Lean.trustCompiler]` |
 | a hand-rolled `axiom` | `unsoundAxioms [oops]` |
 | proves the **negation** of the request | `statementMismatch`, with the type mismatch verbatim |
-| `Classical.em` | `checked [propext, Classical.choice, Quot.sound]` — allowed, and disclosed |
+| `Classical.em` | `checked [Classical.choice, Quot.sound, propext]` — allowed, and disclosed |
 
-The `native_decide` row is the argument for auditing over blacklisting: on v4.33.0-rc1
-it mints a *per-declaration* axiom whose name varies with the declaration, so a
-name-based gate would have to know a name it cannot know in advance. The whitelist
-needs to know nothing. Nothing in `Oracle/Kernel.lean` mentions `native_decide`.
+The `native_decide` row is the argument for auditing over blacklisting, and the
+toolchain move sharpened it. On our pin it introduces `Lean.ofReduceBool` and
+`Lean.trustCompiler`; on v4.33.0-rc1 it instead minted a *per-declaration* axiom named
+after the declaration being proved. So a name-based gate would need names that vary with
+both the declaration **and** the toolchain. The whitelist needs to know none of them —
+`native_decide` is named nowhere in `Oracle/Kernel.lean`.
 
 The `statementMismatch` row is the failure v1 hit live: asked to prove something false,
 the model proved its negation — a true theorem, axiom-clean, and *not what was asked*.
@@ -122,11 +127,11 @@ The oracle elaborates **in-process** via `Lean.Elab.process`, against an environ
 imported once at startup:
 
 ```
-[64588 ms] import Mathlib (ONCE, at startup)
-   [138 ms] identity is a left unit for ≫          → checked [propext]
-    [17 ms] iso hom ≫ inv = id, statement matched  → checked [propext]
-    [24 ms] functors preserve retractions          → checked []
-     [4 ms] ATTACK: sorry in a Mathlib proof       → unsoundAxioms [sorryAx]
+[63843 ms] import Mathlib (ONCE, at startup)
+   [139 ms] identity is a left unit for ≫          → checked [propext]
+    [23 ms] iso hom ≫ inv = id, statement matched  → checked [propext]
+    [25 ms] functors preserve retractions          → checked []
+     [6 ms] ATTACK: sorry in a Mathlib proof       → unsoundAxioms [sorryAx]
 ```
 
 The plan anticipated needing `leanprover-community/repl` as a side process with pickled
@@ -150,17 +155,30 @@ v1-idris/     the Idris2 predecessor, preserved intact
 Git history from v1 is preserved in this repository, so `git log` shows the whole
 evolution rather than starting from a synthetic initial commit.
 
-## Toolchain
+## Toolchain — pinned to Aristotle's, deliberately
 
-Pinned to `leanprover/lean4:v4.33.0-rc1`, matching Mathlib master. Note that
-[`sinhp/Poly`](https://github.com/sinhp/Poly) currently pins `v4.28.0-rc1`, so it
-cannot be a hard dependency at this pin — hence the small vendored `Poly/` kernel,
-bridged to `Mathlib.Data.PFunctor` for cross-checking.
+```
+leanprover/lean4:v4.28.0
+mathlib  8f9d9cff6bd728b17a24e163c9402775d9e6a365   (= tag v4.28.0)
+```
+
+**Do not bump either to chase a newer Mathlib.** Re-verifying Aristotle's output against
+our own kernel is the whole trust story, and it only works if both sides speak the same
+Mathlib. Under version skew a failed re-verification is ambiguous — unsound, or a lemma
+renamed in the intervening commits? — and an ambiguous verdict destroys exactly what the
+oracle exists to provide.
+
+Two things fall out of this. It puts us on a stable release rather than a release
+candidate, with Mathlib pinned to a commit rather than the moving `master`. And
+[`sinhp/Poly`](https://github.com/sinhp/Poly) pins `v4.28.0-rc1` — the same release line
+— so it is back in range as an optional cross-check. The small vendored `Poly/` kernel
+stays as the thing the server compiles against: fast, readable, no version risk.
 
 ```bash
 brew install elan-init
-lake update
+lake update && lake exe cache get
 lake build
+./scripts/check.sh --full
 ```
 
 ## What this will and will not claim

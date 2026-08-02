@@ -24,11 +24,12 @@ Three gates, in order:
    case: it emits a **warning**, not an error, so gate 1 passes it happily — and it is
    caught here because it leaves `sorryAx` in the axiom set.
 
-   `native_decide` is the sharper example. Measured on this toolchain it mints a
-   *per-declaration* axiom — `cand._native.native_decide.ax_1` — whose name varies with
-   the declaration being proved. A name-based gate would need a name it cannot know in
-   advance; the whitelist needs to know nothing, and `native_decide` is named nowhere in
-   this file.
+   `native_decide` is the sharper example, because what it leaves behind is not stable.
+   On v4.28.0 (our pin) it introduces `Lean.ofReduceBool` and `Lean.trustCompiler`; on
+   v4.33.0-rc1 it instead mints a *per-declaration* axiom whose name varies with the
+   declaration being proved. A name-based gate would need names that change with both the
+   declaration and the toolchain. The whitelist needs to know none of them — and
+   `native_decide` is named nowhere in this file.
 
 3. **Statement match.** Elaboration proving *something* is not the same as proving
    what was asked. The check is `example : <requested> := <declName>`, which succeeds
@@ -79,9 +80,15 @@ instance : MonadEnv EnvM where
   getEnv := get
   modifyEnv f := modify f
 
-/-- The axioms `declName` transitively depends on, in `env`. -/
+/-- The axioms `declName` transitively depends on, in `env`, **sorted**.
+
+`collectAxioms` returns traversal order, which is an implementation detail and is not
+stable across toolchains — moving from v4.33.0-rc1 to v4.28.0 reordered an otherwise
+identical result. The axiom set is user-facing evidence: it is rendered into the JSON a
+caller audits, so it needs a canonical order rather than whatever order the environment
+happened to be walked in. -/
 def axiomsOf (env : Environment) (declName : Name) : Array Name :=
-  (collectAxioms (m := EnvM) declName).run' env
+  ((collectAxioms (m := EnvM) declName).run' env).qsort (·.toString < ·.toString)
 
 /-- Errors from a message log, formatted as Lean prints them. Warnings are dropped:
 they are not failures, and the one warning that *matters* (`declaration uses 'sorry'`)
