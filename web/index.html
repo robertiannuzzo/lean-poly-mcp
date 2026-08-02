@@ -216,8 +216,36 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 let currentEntry = null;
 let currentProjectId = null;
+let aristotlePollTimer = null;
+let aristotleStatusHistory = [];
+
+function stopAristotlePolling() {
+  if (aristotlePollTimer) {
+    clearTimeout(aristotlePollTimer);
+    aristotlePollTimer = null;
+  }
+}
+
+function isTerminalStatus(status) {
+  return ["COMPLETE", "COMPLETED", "SUCCEEDED", "DONE", "FAILED", "ERROR", "CANCELLED", "CANCELED"].includes(String(status || "").toUpperCase());
+}
+
+function setAristotleStatus(status, suffix = "") {
+  const normalized = String(status || "UNKNOWN").toUpperCase();
+  if (aristotleStatusHistory[aristotleStatusHistory.length - 1] !== normalized) {
+    aristotleStatusHistory.push(normalized);
+  }
+  const trail = aristotleStatusHistory.length > 1 ? ` · ${aristotleStatusHistory.join(" -> ")}` : "";
+  $("aristotleMeta").textContent = `Aristotle status: ${normalized}${trail}${suffix}`;
+}
+
+function scheduleAristotlePoll(delayMs = 15000) {
+  stopAristotlePolling();
+  aristotlePollTimer = setTimeout(() => pollAristotle({ auto: true }), delayMs);
+}
 
 function render(data) {
+  stopAristotlePolling();
   if (data.error) {
     $("result").innerHTML = `<div class="error">${esc(data.error)}</div>`;
     return;
@@ -234,6 +262,7 @@ function render(data) {
   const canSubmit = miss && quality.label !== "skip";
   currentEntry = entry;
   currentProjectId = null;
+  aristotleStatusHistory = [];
 
   $("result").innerHTML = `
     ${data.message ? `<div class="panel" style="padding:12px; margin-bottom:12px"><span class="meta">${esc(data.message)}</span></div>` : ""}
@@ -285,6 +314,8 @@ function render(data) {
 async function sendToAristotle() {
   const send = $("sendAristotle");
   const poll = $("pollAristotle");
+  stopAristotlePolling();
+  aristotleStatusHistory = [];
   send.disabled = true;
   $("aristotleMeta").textContent = "Submitting nonblocking Aristotle job...";
   $("aristotleResult").innerHTML = "";
@@ -301,15 +332,20 @@ async function sendToAristotle() {
     return;
   }
   currentProjectId = response.projectId;
-  $("aristotleMeta").textContent = `Submitted Aristotle project ${currentProjectId}.`;
+  $("aristotleMeta").textContent = `Submitted Aristotle project ${currentProjectId}. First status check starting...`;
   poll.disabled = false;
+  scheduleAristotlePoll(1500);
 }
 
-async function pollAristotle() {
+async function pollAristotle(options = {}) {
   if (!currentProjectId) return;
+  const auto = Boolean(options.auto);
   const poll = $("pollAristotle");
+  stopAristotlePolling();
   poll.disabled = true;
-  $("aristotleMeta").textContent = "Checking Aristotle status...";
+  if (!auto) {
+    $("aristotleMeta").textContent = "Checking Aristotle status...";
+  }
   const response = await (await fetch(`/api/aristotle-status?projectId=${encodeURIComponent(currentProjectId)}`)).json();
   poll.disabled = false;
   if (response.error) {
@@ -317,13 +353,16 @@ async function pollAristotle() {
     $("aristotleResult").innerHTML = `<div class="error">${esc(response.error)}</div>`;
     return;
   }
-  $("aristotleMeta").textContent = `Aristotle status: ${response.status}`;
+  setAristotleStatus(response.status, isTerminalStatus(response.status) ? "" : " · polling every 15s");
   if (response.proof) {
     $("aristotleResult").innerHTML = `
       <div class="label" style="margin-top:14px">Aristotle output (not locally trusted until reverified)</div>
       <pre>${esc(response.proof)}</pre>
       <div class="meta">downloaded from ${esc(response.proofPath || "archive")}</div>
     `;
+  }
+  if (!isTerminalStatus(response.status)) {
+    scheduleAristotlePoll();
   }
 }
 
