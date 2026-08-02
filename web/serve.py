@@ -8,8 +8,10 @@ Then open http://localhost:8770
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import uuid
@@ -203,6 +205,10 @@ class AristotleJobs:
             "  sorry\n",
             encoding="utf-8",
         )
+        for name in ["lean-toolchain", "lakefile.toml", "lake-manifest.json"]:
+            source = ROOT / name
+            if source.exists():
+                shutil.copy2(source, job_dir / name)
         (job_dir / "entry.json").write_text(json.dumps({"entry": entry, "quality": quality}, indent=2), encoding="utf-8")
 
         prompt = (
@@ -261,10 +267,11 @@ class AristotleJobs:
         return response
 
     def download(self, record):
-        dest = Path(record["jobDir"]) / "download"
-        dest.mkdir(exist_ok=True)
+        archive = Path(record["jobDir"]) / "download.tar.gz"
+        extract_dir = Path(record["jobDir"]) / "download"
+        extract_dir.mkdir(exist_ok=True)
         out = subprocess.run(
-            ["aristotle", "download", record["projectId"], "--destination", str(dest)],
+            ["aristotle", "download", record["projectId"], "--destination", str(archive)],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -273,7 +280,14 @@ class AristotleJobs:
         )
         if out.returncode != 0:
             return {"downloadError": out.stderr[-1200:] or out.stdout[-1200:]}
-        lean_files = [p for p in dest.rglob("*.lean") if ".lake" not in p.parts]
+
+        if archive.exists() and archive.stat().st_size > 0:
+            try:
+                self.extract_archive(archive, extract_dir)
+            except (tarfile.TarError, OSError) as e:
+                return {"downloadError": f"downloaded Aristotle archive, but could not extract it: {e}"}
+
+        lean_files = [p for p in extract_dir.rglob("*.lean") if ".lake" not in p.parts]
         proof = ""
         proof_path = ""
         for path in lean_files:
@@ -282,7 +296,33 @@ class AristotleJobs:
                 proof = text
                 proof_path = str(path)
                 break
-        return {"downloaded": True, "proofPath": proof_path, "proof": proof[:20000]}
+        summary = self.read_first(extract_dir, "ARISTOTLE_SUMMARY.md")
+        readme = self.read_first(extract_dir, "README.md")
+        files = [str(p.relative_to(extract_dir)) for p in extract_dir.rglob("*") if p.is_file()]
+        return {
+            "downloaded": True,
+            "proofPath": proof_path,
+            "proof": proof[:20000],
+            "summary": summary[:8000],
+            "readme": readme[:4000],
+            "downloadFiles": files[:80],
+        }
+
+    @staticmethod
+    def extract_archive(archive, extract_dir):
+        with tarfile.open(archive, "r:*") as tar:
+            for member in tar.getmembers():
+                target = (extract_dir / member.name).resolve()
+                if not str(target).startswith(str(extract_dir.resolve()) + os.sep):
+                    raise tarfile.TarError(f"unsafe archive path: {member.name}")
+            tar.extractall(extract_dir)
+
+    @staticmethod
+    def read_first(root, name):
+        for path in root.rglob(name):
+            if ".lake" not in path.parts:
+                return path.read_text(encoding="utf-8", errors="replace")
+        return ""
 
     def load_record(self, project_id):
         for path in JOB_ROOT.glob("*/job.json"):

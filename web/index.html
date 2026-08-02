@@ -356,9 +356,22 @@ async function pollAristotle(options = {}) {
   setAristotleStatus(response.status, isTerminalStatus(response.status) ? "" : " · polling every 15s");
   if (response.proof) {
     $("aristotleResult").innerHTML = `
+      ${response.summary ? `<div class="label" style="margin-top:14px">Aristotle summary</div><pre>${esc(response.summary)}</pre>` : ""}
       <div class="label" style="margin-top:14px">Aristotle output (not locally trusted until reverified)</div>
       <pre>${esc(response.proof)}</pre>
       <div class="meta">downloaded from ${esc(response.proofPath || "archive")}</div>
+    `;
+  } else if (response.downloadError) {
+    $("aristotleResult").innerHTML = `
+      <div class="label" style="margin-top:14px">Aristotle download error</div>
+      <div class="error">${esc(response.downloadError)}</div>
+    `;
+  } else if (response.downloaded) {
+    $("aristotleResult").innerHTML = `
+      ${response.summary ? `<div class="label" style="margin-top:14px">Aristotle summary</div><pre>${esc(response.summary)}</pre>` : ""}
+      <div class="label" style="margin-top:14px">Downloaded artifact</div>
+      <pre>${esc((response.downloadFiles || []).join("\n") || "No files listed in downloaded artifact.")}</pre>
+      <div class="meta">No Lean proof file matching the expected theorem shape was found.</div>
     `;
   }
   if (!isTerminalStatus(response.status)) {
