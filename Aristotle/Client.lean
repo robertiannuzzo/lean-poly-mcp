@@ -36,6 +36,14 @@ structure Job where
   projectId : String
   deriving Repr, Inhabited, BEq
 
+/-- A formalized theorem statement, before any proof search. This is an untrusted
+proposal: callers still use statement matching after a proof is produced, because
+English/LaTeX → Lean is exactly where misformalization can enter. -/
+structure Formalization where
+  statement : String
+  preamble : String := ""
+  deriving Repr, Inhabited, BEq
+
 inductive Status where
   | queued
   | running
@@ -97,6 +105,50 @@ where
         .error s!"empty project id in aristotle output:\n{out}"
       else .ok ⟨id⟩
     | _ => .error s!"could not find a project id in aristotle output:\n{out}"
+
+/-- Ask Aristotle to translate prose/LaTeX into a Lean statement.
+
+Replay reads `formalize.txt`; tests and demos therefore exercise the parsing path without
+touching the network. The CLI output observed/documented for `formalize` is intentionally
+treated as text, not trusted structure: comments and Markdown fences are stripped, then
+the remaining Lean statement is handed to our own elaborator by callers. -/
+def formalize (prompt : String) (imports : List String := ["Mathlib"])
+    (replay : Option String := none) : IO (Except String Formalization) := do
+  if let some cached ← readReplay replay "formalize.txt" then
+    return parseFormalize cached
+  let importArgs := imports.foldr (fun i acc => "--import" :: i :: acc) []
+  let args := ["formalize", prompt] ++ importArgs
+  match ← runCli args with
+  | .error e => return .error e
+  | .ok out => return parseFormalize out
+where
+  stripFence (s : String) : String :=
+    let lines := s.splitOn "\n"
+    let lines := lines.filter fun l =>
+      let t := l.trimAscii.toString
+      !(t.startsWith "```") && !(t.startsWith "--")
+    "\n".intercalate lines
+
+  firstStatementLine (s : String) : String :=
+    let candidates := (stripFence s).splitOn "\n" |>.map (·.trimAscii.toString) |>.filter (!·.isEmpty)
+    match candidates.find? (fun l => l.startsWith "∀" || l.startsWith "theorem " ||
+        l.startsWith "example " || l.startsWith "def " || l.startsWith "class " ||
+        l.startsWith "instance " || l.startsWith "#check ") with
+    | some line =>
+      let line := line.replace "#check" ""
+      let line := line.replace "theorem cand :" ""
+      let line := line.replace "example :" ""
+      let line := line.replace " := by sorry" ""
+      let line := line.replace " := sorry" ""
+      line.trimAscii.toString
+    | none => (stripFence s).trimAscii.toString
+
+  parseFormalize (out : String) : Except String Formalization :=
+    let stmt := firstStatementLine out
+    if stmt.isEmpty then
+      .error s!"empty formalization in aristotle output:\n{out}"
+    else
+      .ok { preamble := "open CategoryTheory", statement := stmt }
 
 /-- Poll. Uses `tasks` rather than `show`: `show` is a live TUI that redraws with ANSI
 escapes and does not terminate, which is unparseable and unpollable. -/

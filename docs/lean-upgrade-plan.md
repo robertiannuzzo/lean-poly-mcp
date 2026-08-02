@@ -286,6 +286,11 @@ the tools that exist, rather than a summand whose only possible response is an e
 Client via the `aristotle` CLI shelled out from Lean (`IO.Process`), so the vendor SDK is
 the only non-Lean dependency. `ARISTOTLE_API_KEY`.
 
+**Formalization is wired too.** `Aristotle.formalize` wraps `aristotle formalize` for
+prose/LaTeX → Lean statement proposals, with the same replay-first discipline as proof
+jobs (`formalize.txt`). This is not evidence; it is the untrusted statement proposal that
+later statement matching is designed to police.
+
 **Never blocking.** Published runtimes reach ~8 hours. `aristotle_submit` returns a job
 handle; `status`/`fetch` poll. In Poly terms the submit position's direction is a *job
 handle*, not a proof — a clean illustration of why the direction type depends on the
@@ -380,6 +385,18 @@ Two caveats that matter more than the numbers:
 seven. So the per-tactic attribution is an artifact of rung order, not a claim about
 which tactic is better — noted in `docs/tactic-notes.lean` §3.
 
+The curated corpus is no longer the only source. `Formalize.Miner` walks an
+already-imported Mathlib environment, extracts `CategoryTheory.*` theorem/axiom types,
+pretty-prints them as Lean statement strings, and filters to statements that elaborate in
+the target preamble. `test/MinerTest.lean` keeps this in the full sweep; it does not add
+Mathlib cost to the fast path.
+
+`Formalize.Report` is the benchmark generator over that miner. `lake exe miner-report
+--limit 2 --max-tier 0` samples semantic slices (`Functor`, `NatTrans`, `Iso`,
+`Adjunction`, `Equivalence`, `yoneda`, `Limits`), runs the local ladder, and reports
+local wins separately from well-formed local misses. The misses are the Aristotle
+candidate queue; no LLM-generated random lemma stream is needed.
+
 ---
 
 ## 8. Phase 7 — tactics ✅ **done**
@@ -438,21 +455,11 @@ supplied candidate survives             [57 ms]  SOLVED via supplied candidate
 supplied candidate is rejected (sorry)  [17 ms]  REJECTED — axioms outside whitelist: [sorryAx]
 ```
 
-Four panels, one self-contained page (no build step, no CDN — reviewable, and shareable
-as an artifact):
-
-1. **Polynomial explorer** — positions and directions of the live server; adding tools
-   visibly changes the coproduct. **Nothing on this panel is hardcoded**: MCP already
-   names both halves, `inputSchema` is the position and `outputSchema` the direction, so
-   `tools/list` advertises `Σ_t inputSchema_t → outputSchema_t` with no extension to the
-   protocol. Populating `outputSchema` was the only change the front end required of the
-   server.
-2. **Session tree** — the run as a path through `𝒞_p`, with abandoned tier-0/1 branches
-   greyed. The picture that makes the categorical story legible without reading Lean.
-3. **Proof panel** — statement, term, **axiom set**, match result, and which tier solved
-   it. The axiom list is the trust story; keep it prominent.
-4. **Aristotle queue** — jobs, elapsed time, and local re-verification shown *separately*
-   from Harmonic's own claim.
+The front end is now deliberately narrow: one self-contained page with one button. It
+calls `miner-report --json`, shows the next mined Mathlib `CategoryTheory` declaration
+and its Lean statement, and labels the local-ladder result as either `solved locally` or
+`interesting miss`. This keeps the UI aligned with the actual next workflow: finding
+good Aristotle candidates cheaply, not demonstrating every subsystem at once.
 
 ---
 

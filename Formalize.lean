@@ -1,4 +1,6 @@
 import Formalize.Benchmark
+import Formalize.Miner
+import Formalize.Report
 
 /-!
 # Formalize
@@ -19,5 +21,12 @@ harness:
 One untrusted proposer (Aristotle) feeds one oracle, reached only after the free local
 tiers (`aesop_cat`, then `exact?`/`apply?`) have failed.
 
-Not yet implemented — see `docs/lean-upgrade-plan.md` §7.
+`Formalize.Miner` adds the Mathlib side of the corpus: it mines `CategoryTheory.*`
+declarations from an already-imported environment and renders their types as Lean
+statement strings. The caller pays the Mathlib import once, then feeds those statements
+through the same oracle/search/Aristotle path as the hand-curated benchmark.
+
+`Formalize.Report` turns that into a benchmark generator: mine semantic namespace
+slices, run the free ladder, and print the locally-unsolved statements that are worth
+considering for Aristotle.
 -/

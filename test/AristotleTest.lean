@@ -30,6 +30,17 @@ def requestedStatement : String :=
 def main : IO UInt32 := do
   let mut failed := 0
 
+  -- 0. Formalization is replayable and remains only an untrusted statement proposal.
+  match ← Aristotle.formalize "unused-in-replay" (replay := some fixtures) with
+  | .error e => IO.println s!"  FAIL  formalize parse: {e}"; failed := failed + 1
+  | .ok f =>
+    if f.preamble == "open CategoryTheory" &&
+        f.statement == "∀ {C : Type*} [Category C] {X Y : C} (f : X ⟶ Y), 𝟙 X ≫ f = f" then
+      IO.println "  ok    formalize parsed a Lean statement proposal"
+    else
+      IO.println s!"  FAIL  formalize parsed wrong statement: {repr f}"
+      failed := failed + 1
+
   -- 1. Parsing the submit response.
   match ← Aristotle.submit "unused-in-replay" "unused-in-replay" (replay := some fixtures) with
   | .error e => IO.println s!"  FAIL  submit parse: {e}"; failed := failed + 1

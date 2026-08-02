@@ -26,6 +26,8 @@ if lake env lean --run test/AristotleTest.lean; then :; else fail=1; fi
 if [ "${1:-}" = "--full" ]; then
   echo "--- Mathlib suite (~70s) ---"
   if lake env lean --run test/MathlibOracleTest.lean; then :; else fail=1; fi
+  echo "--- miner: CategoryTheory declarations (~70s) ---"
+  if lake env lean --run test/MinerTest.lean; then :; else fail=1; fi
   echo "--- benchmark: how far the free ladder gets (~70s) ---"
   if lake env lean --run test/BenchmarkTest.lean; then :; else fail=1; fi
   echo "--- agent runs (~50s) ---"

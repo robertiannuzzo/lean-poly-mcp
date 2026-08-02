@@ -1,6 +1,6 @@
 name = "lean-poly-mcp"
 version = "0.1.0"
-defaultTargets = ["Poly", "Tactics", "Mcp", "Oracle", "Formalize", "Aristotle", "Agent", "server", "agent-run"]
+defaultTargets = ["Poly", "Tactics", "Mcp", "Oracle", "Formalize", "Aristotle", "Agent", "server", "agent-run", "miner-report"]
 
 # Pinned to Aristotle's exact Mathlib: commit 8f9d9cff is the tag v4.28.0, and is
 # literally the commit titled "chore: bump toolchain to v4.28.0".
@@ -45,4 +45,9 @@ supportInterpreter = true
 [[lean_exe]]
 name = "server"
 root = "Mcp.Main"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "miner-report"
+root = "Formalize.ReportMain"
 supportInterpreter = true

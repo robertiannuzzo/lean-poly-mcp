@@ -1,0 +1,3 @@
+```lean
+∀ {C : Type*} [Category C] {X Y : C} (f : X ⟶ Y), 𝟙 X ≫ f = f
+```

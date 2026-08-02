@@ -8,8 +8,9 @@ ever trusted.
 > server builds, runs, and answers real JSON-RPC over stdio; the kernel oracle
 > verifies candidates against Mathlib in milliseconds; the graded benchmark and the
 > free tiers of the escalation ladder run locally; the agent runs as a lens against the
-> live server; Aristotle is wired and has completed one live round trip; the front end
-> renders all of it.
+> live server; Aristotle is wired for both formalization and proof filling, with one
+> live proof round trip recorded; the front end is a clean one-button Mathlib statement
+> miner for demos.
 > **Aristotle is the only external service** — there is no LLM and no
 > `ANTHROPIC_API_KEY`; see [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) §2.
 > See [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) for the full plan and
@@ -29,6 +30,23 @@ The oracle is an ordinary **MCP tool**, so any MCP client can drive it:
 ```sh
 claude mcp add lean-poly-mcp -- "$(pwd)/.lake/build/bin/server" Mathlib
 ```
+
+## Demo
+
+For a clean local demo, double-click either file in the repo root:
+
+```text
+Mathlib Statement Miner.app
+Launch Mathlib Miner.command
+```
+
+The launcher builds `miner-report`, starts `localhost:8770`, and opens the page. The UI
+does exactly one thing: press **Mine statement** to pull a real Mathlib
+`CategoryTheory` theorem, show its Lean statement, and mark the local tactic result as
+`solved locally` or `interesting miss`.
+
+The first click imports Mathlib and builds the report, so budget roughly 60–120 seconds.
+Later clicks use the cached report.
 
 ## The idea
 
@@ -125,6 +143,23 @@ but is expected to have type
 
 ## How far free tactics get
 
+The hand-curated benchmark is joined by a Mathlib miner:
+`Formalize.mineWellFormed` scans an already-imported environment for
+`CategoryTheory.*` declarations, renders their types as Lean statement strings, and
+keeps only statements the oracle can parse in the target preamble. The import remains an
+explicit caller cost; tests batch it once.
+
+`miner-report` turns that source into a candidate list:
+
+```sh
+lake exe miner-report --limit 2 --max-tier 0
+```
+
+It mines semantic slices (`Functor`, `NatTrans`, `Iso`, `Adjunction`, `Equivalence`,
+`yoneda`, `Limits`), runs the free ladder, and prints two lists: local wins and
+well-formed local misses. The misses are the cheap Aristotle queue; no model usage is
+spent inventing random lemmas.
+
 Tiers 0 and 1 of the escalation ladder are ordinary Lean tactics run through the same
 oracle as everything else — a local success is trusted no more than a remote one. The
 `search` tool exposes them, and `test/BenchmarkTest.lean` measures them:
@@ -142,29 +177,30 @@ corpus marks genuinely-absent statements `[novel]`; and the one informative miss
 
 ## The front end
 
+The UI is intentionally narrow: one page, one button, one task — mine a Mathlib
+statement and show whether the local ladder solved it or missed it. See **Demo** above
+for the double-click launchers.
+
+The development command is:
+
 ```sh
-lake build server agent-run
-python3 web/serve.py            # Poly kernel only — ready in ~1s
-python3 web/serve.py Mathlib    # category theory — ~55s startup, then ms per candidate
+lake build miner-report
+python3 web/serve.py
 ```
 
-Four panels at `localhost:8770`, all on live data. The first is the one worth pointing
-at: **MCP already names both halves of a polynomial.** `inputSchema` is the position,
-`outputSchema` the direction, so `tools/list` advertises
-
-```
-MCP = hello·y^String + check·y^Oracle.Outcome + search·y^Tactics.Outcome
-```
-
-with no extension to the protocol — the page reads the interface's structure off the
-wire rather than being told it. The others draw the agent's session as a path, the axiom
-audit behind each verdict, and Aristotle's claim beside our own.
+The first click pays the Mathlib import and report generation cost; the result is cached
+for the rest of the session.
 
 ## Aristotle, and what we do with what it returns
 
-Tier 2 is the only component that leaves the machine. It is job-based (submissions return
-a handle, never a proof), and **everything it returns goes through our oracle before it is
-called anything**.
+Tier 2 is the only component that leaves the machine. `formalize` proposes a Lean
+statement from prose/LaTeX; `submit` proposes a proof by filling `sorry`s. Both are
+untrusted. Proof jobs are job-based (submissions return a handle, never a proof), and
+**everything Aristotle returns goes through our oracle before it is called evidence**.
+
+Replay fixtures cover both paths: `formalize.txt` for statement parsing and
+`submit/status/proof` for the proof round trip. Tests and demos use those fixtures and do
+not contact Aristotle.
 
 One live round trip, 2026-08-01, on the single benchmark goal the free ladder could not
 reach — it needs induction:
@@ -276,7 +312,7 @@ Oracle/       in-process elaboration, axiom audit, statement matching
 Formalize/    category-theory autoformalization and its graded benchmark
 Agent/        the agent as a lens S y^S → MCP
 Aristotle/    Harmonic Aristotle API client (job-based; output re-verified locally)
-web/          front end — polynomial explorer, session tree, axiom audit, job queue
+web/          front end — one-button Mathlib statement miner
 test/
 v1-idris/     the Idris2 predecessor, preserved intact
 ```
