@@ -192,7 +192,10 @@
 <main>
   <header>
     <h1>Mathlib Statement Miner</h1>
-    <button id="mine">Mine statement</button>
+    <div class="actions" style="margin-top:0">
+      <button id="mine">Mine statement</button>
+      <button id="findCandidate" class="secondary">Find Aristotle candidate</button>
+    </div>
   </header>
 
   <section class="panel" id="result">
@@ -225,6 +228,7 @@ function render(data) {
   currentProjectId = null;
 
   $("result").innerHTML = `
+    ${data.message ? `<div class="panel" style="padding:12px; margin-bottom:12px"><span class="meta">${esc(data.message)}</span></div>` : ""}
     <div class="topline">
       <div>
         <div class="label">Mathlib declaration</div>
@@ -235,7 +239,7 @@ function render(data) {
 
     <div class="grid">
       <div class="stat"><div class="label">topic</div><div>${esc(entry.topic)}</div></div>
-      <div class="stat"><div class="label">position</div><div>${data.index}/${data.count}</div></div>
+      <div class="stat"><div class="label">position</div><div>${data.index}/${data.count}${data.scanned ? ` · scanned ${data.scanned}` : ""}</div></div>
       <div class="stat"><div class="label">local result</div><div>${esc(entry.summary)}</div></div>
       <div class="stat"><div class="label">${solved ? "axioms" : "tried"}</div><div>${solved ? esc(axioms.join(", ") || "none") : tried.length}</div></div>
     </div>
@@ -314,12 +318,29 @@ async function pollAristotle() {
 
 $("mine").onclick = async () => {
   const button = $("mine");
+  const other = $("findCandidate");
   button.disabled = true;
+  other.disabled = true;
   $("result").innerHTML = `<div class="empty">Mining...</div>`;
   try {
     render(await (await fetch("/api/mine-next")).json());
   } finally {
     button.disabled = false;
+    other.disabled = false;
+  }
+};
+
+$("findCandidate").onclick = async () => {
+  const button = $("findCandidate");
+  const other = $("mine");
+  button.disabled = true;
+  other.disabled = true;
+  $("result").innerHTML = `<div class="empty">Scanning cached corpus for a maybe/good Aristotle candidate...</div>`;
+  try {
+    render(await (await fetch("/api/find-candidate")).json());
+  } finally {
+    button.disabled = false;
+    other.disabled = false;
   }
 };
 </script>

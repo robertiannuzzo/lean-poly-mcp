@@ -81,6 +81,39 @@ class MineCache:
                 "entry": {**item, "quality": score_candidate(item)},
             }
 
+    def next_candidate(self):
+        with self.lock:
+            report = self.load()
+            if "error" in report:
+                return report
+            entries = report.get("entries", [])
+            if not entries:
+                return {"error": "miner report returned no entries"}
+            best = None
+            start = self.index
+            for offset in range(len(entries)):
+                raw = entries[(start + offset) % len(entries)]
+                quality = score_candidate(raw)
+                outcome = (raw.get("verdict") or {}).get("outcome", "")
+                enriched = {**raw, "quality": quality}
+                if best is None or quality["score"] > best["entry"]["quality"]["score"]:
+                    best = {
+                        "index": ((start + offset) % len(entries)) + 1,
+                        "count": len(entries),
+                        "scanned": offset + 1,
+                        "report": {k: report.get(k) for k in ["importMs", "total", "solved", "misses", "unusable"]},
+                        "entry": enriched,
+                    }
+                if outcome == "interesting_miss" and quality["label"] in ["good", "maybe"]:
+                    self.index = ((start + offset) % len(entries)) + 1
+                    return best
+            self.index = (start + len(entries)) % len(entries)
+            if best is not None:
+                best["noCandidate"] = True
+                best["message"] = "No maybe/good Aristotle candidate found in this cached corpus; showing the highest-scoring entry."
+                return best
+            return {"error": "miner report returned no entries"}
+
 
 def score_candidate(entry):
     name = entry.get("name", "")
@@ -293,6 +326,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send((Path(__file__).parent / "index.html").read_bytes(), "text/html")
         elif parsed.path == "/api/mine-next":
             self._send(self.mine_cache.next())
+        elif parsed.path == "/api/find-candidate":
+            self._send(self.mine_cache.next_candidate())
         elif parsed.path == "/api/aristotle-status":
             project_id = parse_qs(parsed.query).get("projectId", [""])[0]
             self._send(self.aristotle_jobs.status(project_id))
