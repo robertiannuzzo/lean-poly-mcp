@@ -209,6 +209,7 @@
     <div class="actions" style="margin-top:0">
       <button id="mine">Mine statement</button>
       <button id="findCandidate" class="secondary">Find Aristotle candidate</button>
+      <button id="proposeTheorem" class="secondary">Propose theorem</button>
     </div>
   </header>
 
@@ -222,6 +223,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 let currentEntry = null;
 let currentProjectId = null;
+let currentProposal = null;
 let aristotlePollTimer = null;
 let aristotleStatusHistory = [];
 
@@ -267,6 +269,7 @@ function render(data) {
   const badge = solved ? "solved locally" : miss ? "interesting miss" : verdict.outcome || "unknown";
   const canSubmit = miss && quality.label !== "skip";
   currentEntry = entry;
+  currentProposal = entry.proposal || null;
   currentProjectId = null;
   aristotleStatusHistory = [];
 
@@ -274,7 +277,7 @@ function render(data) {
     ${data.message ? `<div class="panel" style="padding:12px; margin-bottom:12px"><span class="meta">${esc(data.message)}</span></div>` : ""}
     <div class="topline">
       <div>
-        <div class="label">Mathlib declaration</div>
+        <div class="label">${entry.source === "agentic_conjecture" ? "Agentic proposal" : "Mathlib declaration"}</div>
         <div class="decl">${esc(entry.name)}</div>
       </div>
       <div class="badge ${solved ? "solved" : miss ? "miss" : ""}">${esc(badge)}</div>
@@ -315,6 +318,87 @@ function render(data) {
   `;
   $("sendAristotle").onclick = sendToAristotle;
   $("pollAristotle").onclick = pollAristotle;
+}
+
+function renderProposal(data) {
+  stopAristotlePolling();
+  if (data.error) {
+    $("result").innerHTML = `<div class="error">${esc(data.error)}</div>`;
+    return;
+  }
+  const proposal = data.proposal;
+  currentProposal = proposal;
+  currentEntry = null;
+  currentProjectId = null;
+  aristotleStatusHistory = [];
+  $("result").innerHTML = `
+    <div class="topline">
+      <div>
+        <div class="label">Agentic theorem proposal</div>
+        <div class="decl">${esc(proposal.title)}</div>
+      </div>
+      <div class="badge maybe">proposed</div>
+    </div>
+
+    <div class="grid">
+      <div class="stat"><div class="label">topic</div><div>${esc(proposal.topic)}</div></div>
+      <div class="stat"><div class="label">source</div><div>local typed chain</div></div>
+      <div class="stat"><div class="label">seed</div><div>${esc(proposal.seed.name || "none")}</div></div>
+      <div class="stat"><div class="label">gate</div><div>human click</div></div>
+    </div>
+
+    <div class="label" style="margin-top:14px">Proposed theorem in prose</div>
+    <pre class="summary-box">${esc(proposal.prose)}</pre>
+
+    <div class="panel" style="padding:12px; margin-top:12px">
+      <div class="label">Self-revising discovery chain</div>
+      <ul class="reasons">
+        ${(proposal.chain || []).map(step => `<li><strong>${esc(step.artifact)}</strong> · ${esc(step.status)} · ${esc(step.text)}</li>`).join("")}
+      </ul>
+    </div>
+
+    <div class="panel" style="padding:12px; margin-top:12px">
+      <div class="label">Rationale</div>
+      <div class="meta">${esc(proposal.rationale)}</div>
+    </div>
+
+    <div class="actions">
+      <button id="formalizeAristotle">Formalize with Aristotle</button>
+      <span class="meta" id="formalizeMeta">Explicit click required; this may spend Aristotle credits.</span>
+    </div>
+    <div id="formalizeResult"></div>
+  `;
+  $("formalizeAristotle").onclick = formalizeWithAristotle;
+}
+
+async function formalizeWithAristotle() {
+  if (!currentProposal) return;
+  const button = $("formalizeAristotle");
+  button.disabled = true;
+  $("formalizeMeta").textContent = "Asking Aristotle to formalize the prose theorem...";
+  $("formalizeResult").innerHTML = "";
+  const response = await (await fetch("/api/aristotle-formalize", {
+    method: "POST",
+    body: JSON.stringify({ proposal: currentProposal })
+  })).json();
+  if (response.error) {
+    $("formalizeMeta").textContent = "Formalization failed.";
+    $("formalizeResult").innerHTML = `
+      <div class="error">${esc(response.error)}</div>
+      ${response.raw ? `<div class="label" style="margin-top:10px">raw Aristotle output</div><pre>${esc(response.raw)}</pre>` : ""}
+    `;
+    return;
+  }
+  $("formalizeMeta").textContent = response.wellFormed
+    ? "Formalized statement parses in Lean; proof submission is still explicit."
+    : "Formalized statement did not parse locally.";
+  render({
+    index: 1,
+    count: 1,
+    report: { total: 1, solved: 0, misses: response.wellFormed ? 1 : 0, unusable: response.wellFormed ? 0 : 1, importMs: 0 },
+    entry: response.entry,
+    message: "Agentic pre-chain produced prose, Aristotle formalized it, and the local parser checked the statement shape."
+  });
 }
 
 async function sendToAristotle() {
@@ -401,28 +485,51 @@ async function pollAristotle(options = {}) {
 $("mine").onclick = async () => {
   const button = $("mine");
   const other = $("findCandidate");
+  const proposer = $("proposeTheorem");
   button.disabled = true;
   other.disabled = true;
+  proposer.disabled = true;
   $("result").innerHTML = `<div class="empty">Mining...</div>`;
   try {
     render(await (await fetch("/api/mine-next")).json());
   } finally {
     button.disabled = false;
     other.disabled = false;
+    proposer.disabled = false;
   }
 };
 
 $("findCandidate").onclick = async () => {
   const button = $("findCandidate");
   const other = $("mine");
+  const proposer = $("proposeTheorem");
   button.disabled = true;
   other.disabled = true;
+  proposer.disabled = true;
   $("result").innerHTML = `<div class="empty">Scanning cached corpus for a maybe/good Aristotle candidate...</div>`;
   try {
     render(await (await fetch("/api/find-candidate")).json());
   } finally {
     button.disabled = false;
     other.disabled = false;
+    proposer.disabled = false;
+  }
+};
+
+$("proposeTheorem").onclick = async () => {
+  const button = $("proposeTheorem");
+  const mine = $("mine");
+  const find = $("findCandidate");
+  button.disabled = true;
+  mine.disabled = true;
+  find.disabled = true;
+  $("result").innerHTML = `<div class="empty">Building typed theorem-proposal chain...</div>`;
+  try {
+    renderProposal(await (await fetch("/api/propose-theorem")).json());
+  } finally {
+    button.disabled = false;
+    mine.disabled = false;
+    find.disabled = false;
   }
 };
 </script>

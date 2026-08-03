@@ -71,6 +71,19 @@ the local tactic ladder solved it or missed it. If a miss is scored as a good Ar
 candidate, the UI can submit it explicitly, poll for status changes, and display the
 downloaded Aristotle summary and Lean output.
 
+There is also an experimental **Propose theorem** path. It adds a small local agentic
+pre-chain inspired by typed discovery systems:
+
+1. create an open need,
+2. attach a mined Mathlib seed as context,
+3. propose a category theory theorem in prose from a typed template,
+4. wait at an explicit Aristotle gate.
+
+From there, **Formalize with Aristotle** can translate the prose into a Lean statement.
+If the statement parses locally, **Send to Aristotle** can submit the generated theorem
+as a proof-filling job. This path is not a claim of novelty or truth; it is a controlled
+way to create candidate conjectures with visible provenance and gates.
+
 Tests and replay fixtures do not contact Aristotle. Live Aristotle calls happen only
 when the UI submit button or a live Aristotle command is used deliberately.
 
@@ -157,6 +170,26 @@ JSON mode is what the web UI uses:
 ```sh
 lake exe miner-report --limit 2 --max-tier 0 --json
 ```
+
+## Agentic Theorem Proposal
+
+The proposal path is the first step beyond proof reconstruction. It borrows a minimal
+structure from self-revising discovery systems: every generated theorem proposal is an
+artifact with provenance, an open need, a seed, a proposal, and a gate.
+
+The current implementation is deliberately small and deterministic. It does not call a
+general-purpose LLM to brainstorm. Instead, it rotates through category theory theorem
+templates and attaches mined Mathlib context. Aristotle is used only after an explicit
+click, first for prose-to-Lean formalization and then, optionally, for proof filling.
+
+This keeps the spend boundary and trust boundary clean:
+
+| stage | local or external | trusted? |
+|---|---|---|
+| propose theorem in prose | local | no, it is just a candidate |
+| formalize prose to Lean | Aristotle | no, local parsing only checks shape |
+| fill proof | Aristotle | no, output must be rechecked |
+| verify proof | local Lean oracle | yes, subject to the stated axiom whitelist |
 
 ## Trust Model
 

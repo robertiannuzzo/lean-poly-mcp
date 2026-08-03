@@ -22,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MINER_BIN = ROOT / ".lake" / "build" / "bin" / "miner-report"
 JOB_ROOT = ROOT / ".aristotle" / "jobs"
+CONJECTURE_ROOT = ROOT / ".aristotle" / "conjectures"
 PORT = int(os.environ.get("PORT", "8770"))
 
 
@@ -123,10 +124,14 @@ def score_candidate(entry):
     topic = entry.get("topic", "")
     statement = entry.get("statement", "")
     verdict = (entry.get("verdict") or {}).get("outcome", "")
+    generated = entry.get("source") == "agentic_conjecture"
     reasons = []
     score = 0
 
-    if verdict == "interesting_miss":
+    if generated:
+        score += 35
+        reasons.append("agentic conjecture; not known to be in Mathlib")
+    elif verdict == "interesting_miss":
         score += 35
         reasons.append("local free tactics missed")
     else:
@@ -178,6 +183,194 @@ def score_candidate(entry):
     score = max(0, min(100, score))
     label = "good" if score >= 70 else "maybe" if score >= 40 else "skip"
     return {"score": score, "label": label, "reasons": reasons}
+
+
+class AgenticProposer:
+    def __init__(self, mine_cache):
+        self.mine_cache = mine_cache
+        self.lock = threading.Lock()
+        self.index = 0
+        CONJECTURE_ROOT.mkdir(parents=True, exist_ok=True)
+
+    def propose(self):
+        with self.lock:
+            report = self.mine_cache.load()
+            if "error" in report:
+                return report
+            seeds = report.get("entries", [])
+            if not seeds:
+                return {"error": "miner report returned no entries"}
+            template = PROPOSAL_TEMPLATES[self.index % len(PROPOSAL_TEMPLATES)]
+            seed = seeds[self.index % len(seeds)]
+            self.index += 1
+            proposal_id = uuid.uuid4().hex[:12]
+            proposal = {
+                "id": proposal_id,
+                "topic": template["topic"],
+                "title": template["title"],
+                "prose": template["prose"],
+                "rationale": template["rationale"],
+                "seed": {
+                    "name": seed.get("name", ""),
+                    "topic": seed.get("topic", ""),
+                    "summary": seed.get("summary", ""),
+                },
+                "chain": [
+                    {
+                        "artifact": "open_need",
+                        "status": "created",
+                        "text": "Generate a category theory theorem candidate outside the mined-proof reconstruction path.",
+                    },
+                    {
+                        "artifact": "seed_context",
+                        "status": "attached",
+                        "text": seed.get("name", ""),
+                    },
+                    {
+                        "artifact": "proposal",
+                        "status": "ready",
+                        "text": template["prose"],
+                    },
+                    {
+                        "artifact": "gate",
+                        "status": "waiting",
+                        "text": "Aristotle formalization requires an explicit click; proof submission requires a second explicit click.",
+                    },
+                ],
+            }
+            path = CONJECTURE_ROOT / proposal_id
+            path.mkdir(parents=True, exist_ok=False)
+            (path / "proposal.json").write_text(json.dumps(proposal, indent=2), encoding="utf-8")
+            return {"proposal": proposal}
+
+    def formalize(self, proposal):
+        if not os.environ.get("ARISTOTLE_API_KEY"):
+            return {"error": "ARISTOTLE_API_KEY is not set in the environment running web/serve.py"}
+        proposal_id = proposal.get("id") or uuid.uuid4().hex[:12]
+        path = CONJECTURE_ROOT / proposal_id
+        path.mkdir(parents=True, exist_ok=True)
+        prose = proposal.get("prose", "")
+        input_file = path / "formalize.md"
+        input_file.write_text(
+            "# Category theory theorem proposal\n\n"
+            "Translate the following prose theorem into one Lean 4 proposition using Mathlib.\n"
+            "Return only the Lean statement after the colon, with no proof.\n\n"
+            f"{prose}\n",
+            encoding="utf-8",
+        )
+        out = subprocess.run(
+            ["aristotle", "formalize", str(input_file)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=os.environ.copy(),
+        )
+        (path / "formalize.stdout").write_text(out.stdout, encoding="utf-8")
+        (path / "formalize.stderr").write_text(out.stderr, encoding="utf-8")
+        if out.returncode != 0:
+            return {"error": out.stderr[-1600:] or out.stdout[-1600:] or "aristotle formalize failed"}
+        raw = (out.stdout + "\n" + out.stderr).strip()
+        statement = parse_formalized_statement(raw)
+        if not statement:
+            return {"error": "could not parse Aristotle formalization", "raw": raw[-2000:]}
+        well_formed = is_well_formed_statement(statement)
+        entry = {
+            "source": "agentic_conjecture",
+            "kind": "conjecture",
+            "name": f"AgenticConjecture.{proposal_id}",
+            "topic": proposal.get("topic", "category theory"),
+            "statement": statement,
+            "summary": "generated conjecture; not known to be in Mathlib",
+            "verdict": {
+                "outcome": "interesting_miss" if well_formed else "unusable",
+                "tried": [],
+            },
+            "proposal": proposal,
+        }
+        entry["quality"] = score_candidate(entry)
+        record = {"proposal": proposal, "raw": raw, "wellFormed": well_formed, "entry": entry}
+        (path / "formalization.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+        return record
+
+
+PROPOSAL_TEMPLATES = [
+    {
+        "topic": "isomorphisms",
+        "title": "isomorphisms compose with reversed inverse",
+        "prose": (
+            "In any category, if f is an isomorphism from X to Y and g is an isomorphism "
+            "from Y to Z, then the composite f followed by g is an isomorphism from X to Z, "
+            "and its inverse is g inverse followed by f inverse."
+        ),
+        "rationale": "Tests a basic closure law and whether the prover finds existing category isomorphism API.",
+    },
+    {
+        "topic": "natural transformations",
+        "title": "componentwise isomorphism is stable under composition",
+        "prose": (
+            "For functors F, G, and H between two categories, if a natural transformation "
+            "from F to G is componentwise an isomorphism and a natural transformation from "
+            "G to H is componentwise an isomorphism, then their vertical composite is "
+            "componentwise an isomorphism."
+        ),
+        "rationale": "Uses typed artifacts already visible in mined NatTrans statements but asks for a new formulation.",
+    },
+    {
+        "topic": "adjunctions",
+        "title": "left adjoints preserve colimits",
+        "prose": (
+            "Given an adjunction between two categories, the left adjoint preserves colimits "
+            "of any fixed shape whenever those colimits exist."
+        ),
+        "rationale": "A conceptual category theory fact that should push Aristotle toward Mathlib's adjunction/limits API.",
+    },
+    {
+        "topic": "yoneda",
+        "title": "Yoneda reflects isomorphisms",
+        "prose": (
+            "In a locally small category, if the images of two objects under the Yoneda "
+            "embedding are isomorphic, then the original objects are isomorphic."
+        ),
+        "rationale": "A compact representability-style theorem with a clear CategoryTheory target vocabulary.",
+    },
+]
+
+
+def parse_formalized_statement(text):
+    lines = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("```") or line.startswith("--"):
+            continue
+        lines.append(line)
+    text = "\n".join(lines).strip()
+    if text.startswith("#check"):
+        text = text[len("#check"):].strip()
+    elif text.startswith("example :"):
+        text = text[len("example :"):].strip()
+    elif text.startswith("theorem "):
+        match = re.match(r"theorem\s+\S+\s*:\s*(.*)", text, flags=re.DOTALL)
+        if match:
+            text = match.group(1).strip()
+    for suffix in [" := by sorry", " := sorry"]:
+        if suffix in text:
+            text = text.split(suffix, 1)[0].strip()
+    return text
+
+
+def is_well_formed_statement(statement):
+    src = f"import Mathlib\n\nopen CategoryTheory\n\nexample : {statement} := by\n  sorry\n"
+    out = subprocess.run(
+        ["lake", "env", "lean", "--stdin"],
+        input=src,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=lean_env(),
+    )
+    return out.returncode == 0
 
 
 class AristotleJobs:
@@ -358,6 +551,7 @@ class AristotleJobs:
 
 class Handler(BaseHTTPRequestHandler):
     mine_cache = MineCache()
+    agentic_proposer = AgenticProposer(mine_cache)
     aristotle_jobs = AristotleJobs()
 
     def _send(self, body, ctype="application/json", status=200):
@@ -376,6 +570,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(self.mine_cache.next())
         elif parsed.path == "/api/find-candidate":
             self._send(self.mine_cache.next_candidate())
+        elif parsed.path == "/api/propose-theorem":
+            self._send(self.agentic_proposer.propose())
         elif parsed.path == "/api/aristotle-status":
             project_id = parse_qs(parsed.query).get("projectId", [""])[0]
             self._send(self.aristotle_jobs.status(project_id))
@@ -386,6 +582,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         if self.path == "/api/aristotle-submit":
             self._send(self.aristotle_jobs.submit(body.get("entry", {})))
+        elif self.path == "/api/aristotle-formalize":
+            self._send(self.agentic_proposer.formalize(body.get("proposal", {})))
         else:
             self._send({"error": "not found"}, status=404)
 
