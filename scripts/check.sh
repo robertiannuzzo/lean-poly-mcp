@@ -11,7 +11,7 @@ if [ -n "$build_out" ]; then echo "FAIL  build"; echo "$build_out"; exit 1; fi
 echo "ok    build"
 
 # Typecheck-only suites: any output at all is a failure.
-for f in test/PolyTest.lean test/McpTest.lean docs/tactic-notes.lean; do
+for f in test/PolyTest.lean test/McpTest.lean test/PaperBridgeTest.lean docs/tactic-notes.lean; do
   out=$(lake env lean "$f" 2>&1)
   if [ -z "$out" ]; then echo "ok    $f"; else echo "FAIL  $f"; echo "$out" | head -20; fail=1; fi
 done

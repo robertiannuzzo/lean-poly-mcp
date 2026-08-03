@@ -1,5 +1,6 @@
 import Formalize.Benchmark
 import Formalize.Miner
+import Formalize.PaperBridge
 import Formalize.Report
 
 /-!

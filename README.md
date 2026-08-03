@@ -225,6 +225,37 @@ This keeps the spend boundary and trust boundary clean:
 | fill proof | Aristotle | no, output must be rechecked |
 | verify proof | local Lean oracle | yes, subject to the stated axiom whitelist |
 
+## Copresheaf Bridge
+
+`Formalize.PaperBridge` is a small Lean-native bridge between the running demo and the
+categorical language around typed artifact systems.
+
+It builds a schema category `S_b` as the free category on a quiver:
+
+```text
+minedDecl --checkWellFormed--> wellFormedStatement --runOracle--> proofOutcome
+```
+
+The implementation uses Mathlib's `CategoryTheory.Paths`, so Lean gets identities,
+composition, and associativity from the free category construction instead of from a
+hand-written `Category` instance.
+
+An artifact state is then a copresheaf on that schema:
+
+```lean
+abbrev ArtifactState := Schema ⥤ Type
+```
+
+The checked example `initialState` is built from generator-level data with
+`Paths.lift`: mined declarations map to statement artifacts, and statement artifacts map
+to proof outcomes. Its category of elements,
+`Functor.Elements initialState`, is the provenance category of concrete artifacts.
+
+This is deliberately static. The live miner, proposer, local oracle, and Aristotle
+client still run as ordinary Lean/Python effects and write JSON or downloaded archives.
+The copresheaf bridge models the typed shape of the artifact flow; it does not hide
+network calls or mutable demo state inside a pure Lean functor.
+
 ## Trust Model
 
 Everything that produces a proof is untrusted. Lean is the judge.
@@ -323,7 +354,7 @@ Poly/         polynomial functor kernel: objects, lenses, products, sums, compos
 Mcp/          MCP interface, tool registry, server section, JSON-RPC transport
 Oracle/       in-process Lean elaboration, axiom audit, statement matching
 Tactics/      local proof-search ladder
-Formalize/    Mathlib category theory miner and benchmark reports
+Formalize/    Mathlib category theory miner, benchmark reports, and copresheaf bridge
 Agent/        agent as a lens-driven runtime
 Aristotle/    Aristotle client plus offline replay fixtures
 web/          local demo UI and server
