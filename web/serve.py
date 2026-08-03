@@ -291,7 +291,11 @@ class AgenticProposer:
         (path / "formalize.stdout").write_text(out.stdout, encoding="utf-8")
         (path / "formalize.stderr").write_text(out.stderr, encoding="utf-8")
         if out.returncode != 0:
-            return {"error": out.stderr[-1600:] or out.stdout[-1600:] or "aristotle formalize failed"}
+            raw_error = (out.stderr or out.stdout or "aristotle formalize failed").strip()
+            return {
+                "error": summarize_aristotle_error(raw_error),
+                "raw": raw_error[-2400:],
+            }
         raw = (out.stdout + "\n" + out.stderr).strip()
         statement = parse_formalized_statement(raw)
         if not statement:
@@ -523,6 +527,19 @@ def parse_formalized_statement(text):
         if suffix in text:
             text = text.split(suffix, 1)[0].strip()
     return text
+
+
+def summarize_aristotle_error(text):
+    if "AristotleAPIError" in text and "Request failed" in text:
+        return (
+            "Aristotle formalize hit a transient API request failure before returning a "
+            "Lean statement. The proposal is still available; click Formalize with "
+            "Aristotle again to retry."
+        )
+    if "timed out" in text.lower():
+        return "Aristotle formalize timed out before returning a Lean statement. Retry when the service is responsive."
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else "aristotle formalize failed"
 
 
 def is_well_formed_statement(statement):

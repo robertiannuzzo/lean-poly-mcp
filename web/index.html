@@ -383,6 +383,7 @@ async function formalizeWithAristotle() {
     body: JSON.stringify({ proposal: currentProposal })
   })).json();
   if (response.error) {
+    button.disabled = false;
     $("formalizeMeta").textContent = "Formalization failed.";
     $("formalizeResult").innerHTML = `
       <div class="error">${esc(response.error)}</div>
