@@ -206,6 +206,8 @@ rejects custom temperature values for it.
 
 If the configured provider fails or is missing a key/model, the UI records the error and
 falls back to the local deterministic template. This keeps demo behavior predictable.
+The OpenAI path uses the Responses API with structured JSON output; Anthropic uses the
+Messages API.
 
 This keeps the spend boundary and trust boundary clean:
 

@@ -416,15 +416,30 @@ def call_openai_proposer(provider, system, user):
         raise ProposerError("OPENAI_API_KEY is not set")
     payload = {
         "model": provider["model"],
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "max_completion_tokens": provider["max_tokens"],
-        "response_format": {"type": "json_object"},
+        "instructions": system,
+        "input": user,
+        "max_output_tokens": provider["max_tokens"],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "category_theory_theorem_proposal",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "title": {"type": "string"},
+                        "topic": {"type": "string"},
+                        "prose": {"type": "string"},
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["title", "topic", "prose", "rationale"],
+                },
+            }
+        },
     }
     data = request_json(
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/responses",
         payload,
         {
             "Authorization": f"Bearer {key}",
@@ -432,10 +447,7 @@ def call_openai_proposer(provider, system, user):
         },
         provider["timeout"],
     )
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as e:
-        raise ProposerError(f"could not read OpenAI proposal response: {e}") from e
+    return extract_openai_response_text(data)
 
 
 def call_anthropic_proposer(provider, system, user):
@@ -477,6 +489,21 @@ def request_json(url, payload, headers, timeout):
         raise ProposerError(f"provider HTTP {e.code}: {detail}") from e
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
         raise ProposerError(f"provider request failed: {e}") from e
+
+
+def extract_openai_response_text(data):
+    chunks = []
+    for item in data.get("output", []):
+        for part in item.get("content", []):
+            if part.get("type") in ["output_text", "text"]:
+                chunks.append(part.get("text", ""))
+    text = "\n".join(chunk for chunk in chunks if chunk).strip()
+    if text:
+        return text
+    if data.get("status") == "incomplete":
+        reason = (data.get("incomplete_details") or {}).get("reason", "unknown")
+        raise ProposerError(f"OpenAI response was incomplete: {reason}")
+    raise ProposerError(f"could not read OpenAI proposal response: {json.dumps(data)[:1200]}")
 
 
 def clean_generated_proposal(content):
