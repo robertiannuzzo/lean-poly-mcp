@@ -342,10 +342,11 @@ function renderProposal(data) {
 
     <div class="grid">
       <div class="stat"><div class="label">topic</div><div>${esc(proposal.topic)}</div></div>
-      <div class="stat"><div class="label">source</div><div>local typed chain</div></div>
+      <div class="stat"><div class="label">source</div><div>${esc(proposal.provider?.name || "local")}${proposal.provider?.model ? ` · ${esc(proposal.provider.model)}` : ""}</div></div>
       <div class="stat"><div class="label">seed</div><div>${esc(proposal.seed.name || "none")}</div></div>
       <div class="stat"><div class="label">gate</div><div>human click</div></div>
     </div>
+    ${proposal.provider?.fallback ? `<div class="panel" style="padding:12px; margin-top:12px"><span class="meta">Provider fallback: ${esc(proposal.provider.error || "using local proposal")}</span></div>` : ""}
 
     <div class="label" style="margin-top:14px">Proposed theorem in prose</div>
     <pre class="summary-box">${esc(proposal.prose)}</pre>

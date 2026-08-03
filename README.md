@@ -182,11 +182,33 @@ general-purpose LLM to brainstorm. Instead, it rotates through category theory t
 templates and attaches mined Mathlib context. Aristotle is used only after an explicit
 click, first for prose-to-Lean formalization and then, optionally, for proof filling.
 
+Optionally, the proposal stage can call a cheap OpenAI or Anthropic model for the prose
+theorem proposal:
+
+```sh
+export THEOREM_PROPOSER_PROVIDER=openai      # or anthropic
+export THEOREM_PROPOSER_MODEL=<cheap-model-name>
+export OPENAI_API_KEY=...                    # for openai
+export ANTHROPIC_API_KEY=...                 # for anthropic
+python3 web/serve.py
+```
+
+Useful optional knobs:
+
+```sh
+export THEOREM_PROPOSER_MAX_TOKENS=450
+export THEOREM_PROPOSER_TEMPERATURE=0.4
+export THEOREM_PROPOSER_TIMEOUT=45
+```
+
+If the configured provider fails or is missing a key/model, the UI records the error and
+falls back to the local deterministic template. This keeps demo behavior predictable.
+
 This keeps the spend boundary and trust boundary clean:
 
 | stage | local or external | trusted? |
 |---|---|---|
-| propose theorem in prose | local | no, it is just a candidate |
+| propose theorem in prose | local or cheap API | no, it is just a candidate |
 | formalize prose to Lean | Aristotle | no, local parsing only checks shape |
 | fill proof | Aristotle | no, output must be rechecked |
 | verify proof | local Lean oracle | yes, subject to the stated axiom whitelist |

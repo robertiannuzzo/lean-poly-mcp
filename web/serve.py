@@ -14,6 +14,8 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -204,12 +206,26 @@ class AgenticProposer:
             seed = seeds[self.index % len(seeds)]
             self.index += 1
             proposal_id = uuid.uuid4().hex[:12]
+            provider = proposer_provider()
+            provider_error = ""
+            generated = None
+            if provider["name"] != "local":
+                try:
+                    generated = call_proposer_provider(provider, seed, template)
+                except ProposerError as e:
+                    provider_error = str(e)
             proposal = {
                 "id": proposal_id,
-                "topic": template["topic"],
-                "title": template["title"],
-                "prose": template["prose"],
-                "rationale": template["rationale"],
+                "topic": (generated or template)["topic"],
+                "title": (generated or template)["title"],
+                "prose": (generated or template)["prose"],
+                "rationale": (generated or template)["rationale"],
+                "provider": {
+                    "name": provider["name"],
+                    "model": provider.get("model", ""),
+                    "fallback": generated is None and provider["name"] != "local",
+                    "error": provider_error,
+                },
                 "seed": {
                     "name": seed.get("name", ""),
                     "topic": seed.get("topic", ""),
@@ -229,7 +245,7 @@ class AgenticProposer:
                     {
                         "artifact": "proposal",
                         "status": "ready",
-                        "text": template["prose"],
+                        "text": (generated or template)["prose"],
                     },
                     {
                         "artifact": "gate",
@@ -238,6 +254,12 @@ class AgenticProposer:
                     },
                 ],
             }
+            if provider["name"] != "local":
+                proposal["chain"].insert(2, {
+                    "artifact": "cheap_proposer",
+                    "status": "generated" if generated else "fallback",
+                    "text": generated["title"] if generated else provider_error,
+                })
             path = CONJECTURE_ROOT / proposal_id
             path.mkdir(parents=True, exist_ok=False)
             (path / "proposal.json").write_text(json.dumps(proposal, indent=2), encoding="utf-8")
@@ -335,6 +357,150 @@ PROPOSAL_TEMPLATES = [
         "rationale": "A compact representability-style theorem with a clear CategoryTheory target vocabulary.",
     },
 ]
+
+
+class ProposerError(Exception):
+    pass
+
+
+def proposer_provider():
+    name = os.environ.get("THEOREM_PROPOSER_PROVIDER", "local").strip().lower()
+    if name not in ["local", "openai", "anthropic"]:
+        name = "local"
+    return {
+        "name": name,
+        "model": os.environ.get("THEOREM_PROPOSER_MODEL", "").strip(),
+        "temperature": float(os.environ.get("THEOREM_PROPOSER_TEMPERATURE", "0.4")),
+        "max_tokens": int(os.environ.get("THEOREM_PROPOSER_MAX_TOKENS", "450")),
+        "timeout": int(os.environ.get("THEOREM_PROPOSER_TIMEOUT", "45")),
+    }
+
+
+def call_proposer_provider(provider, seed, template):
+    if not provider["model"]:
+        raise ProposerError("THEOREM_PROPOSER_MODEL is not set")
+    system = (
+        "You propose category theory theorem candidates for a Lean 4/Mathlib demo. "
+        "Return only compact JSON with keys title, topic, prose, rationale. "
+        "Do not write Lean syntax. Do not claim novelty. Prefer plausible, theorem-shaped "
+        "category theory statements that Aristotle can later formalize."
+    )
+    user = (
+        "Use this mined Mathlib context as inspiration, but propose a theorem in prose, "
+        "not a copy of the seed.\n\n"
+        f"Seed declaration: {seed.get('name', '')}\n"
+        f"Seed topic: {seed.get('topic', '')}\n"
+        f"Seed local result: {seed.get('summary', '')}\n\n"
+        "A safe local fallback proposal would be:\n"
+        f"Title: {template['title']}\n"
+        f"Topic: {template['topic']}\n"
+        f"Prose: {template['prose']}\n\n"
+        "Return JSON only."
+    )
+    if provider["name"] == "openai":
+        content = call_openai_proposer(provider, system, user)
+    elif provider["name"] == "anthropic":
+        content = call_anthropic_proposer(provider, system, user)
+    else:
+        raise ProposerError("local provider does not call an API")
+    return clean_generated_proposal(content)
+
+
+def call_openai_proposer(provider, system, user):
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        raise ProposerError("OPENAI_API_KEY is not set")
+    payload = {
+        "model": provider["model"],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": provider["temperature"],
+        "max_tokens": provider["max_tokens"],
+        "response_format": {"type": "json_object"},
+    }
+    data = request_json(
+        "https://api.openai.com/v1/chat/completions",
+        payload,
+        {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        provider["timeout"],
+    )
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise ProposerError(f"could not read OpenAI proposal response: {e}") from e
+
+
+def call_anthropic_proposer(provider, system, user):
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        raise ProposerError("ANTHROPIC_API_KEY is not set")
+    payload = {
+        "model": provider["model"],
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+        "temperature": provider["temperature"],
+        "max_tokens": provider["max_tokens"],
+    }
+    data = request_json(
+        "https://api.anthropic.com/v1/messages",
+        payload,
+        {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        },
+        provider["timeout"],
+    )
+    try:
+        parts = data["content"]
+        return "\n".join(part.get("text", "") for part in parts if part.get("type") == "text")
+    except (KeyError, TypeError) as e:
+        raise ProposerError(f"could not read Anthropic proposal response: {e}") from e
+
+
+def request_json(url, payload, headers, timeout):
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[-1200:]
+        raise ProposerError(f"provider HTTP {e.code}: {detail}") from e
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        raise ProposerError(f"provider request failed: {e}") from e
+
+
+def clean_generated_proposal(content):
+    raw = content.strip()
+    if raw.startswith("```"):
+        raw = "\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ProposerError(f"provider did not return JSON: {content[:400]}")
+    try:
+        data = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise ProposerError(f"provider returned invalid JSON: {e}") from e
+    out = {
+        "title": str(data.get("title", "")).strip(),
+        "topic": str(data.get("topic", "")).strip() or "category theory",
+        "prose": str(data.get("prose", "")).strip(),
+        "rationale": str(data.get("rationale", "")).strip(),
+    }
+    if not out["title"] or not out["prose"]:
+        raise ProposerError("provider JSON omitted title or prose")
+    if len(out["prose"]) > 1200:
+        out["prose"] = out["prose"][:1200].rsplit(" ", 1)[0] + "."
+    if not out["rationale"]:
+        out["rationale"] = "Generated by the configured cheap theorem proposer."
+    return out
 
 
 def parse_formalized_statement(text):
