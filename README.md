@@ -3,11 +3,13 @@
 A Lean 4 project that treats an MCP tool interface as a polynomial functor, then uses
 Lean's kernel as the trust boundary for proof-producing agents.
 
-The current demo mines real `Mathlib.CategoryTheory` theorem statements, hides their
-existing proofs, tries cheap local tactics, and optionally sends good misses to
-Aristotle for proof reconstruction. Aristotle is useful, but never trusted directly:
-anything it returns must elaborate locally, pass the axiom whitelist, and match the
-requested statement.
+The current demo has two category theory paths. It can mine real
+`Mathlib.CategoryTheory` theorem statements, hide their existing proofs, try cheap local
+tactics, and optionally send good misses to Aristotle for proof reconstruction. It can
+also propose candidate theorems in prose, ask Aristotle to formalize them, and then route
+locally parseable statements into the same proof-filling pipeline. Aristotle is useful,
+but never trusted directly: anything it returns must elaborate locally, pass the axiom
+whitelist, and match the requested statement.
 
 ## What this is
 
@@ -66,13 +68,14 @@ http://localhost:8770
 The first click imports Mathlib and builds the cached mining report, so it can take
 roughly 60-120 seconds. Later clicks use the cached report.
 
-The page does one thing: mine a real `Mathlib.CategoryTheory` statement and show whether
-the local tactic ladder solved it or missed it. If a miss is scored as a good Aristotle
-candidate, the UI can submit it explicitly, poll for status changes, and display the
-downloaded Aristotle summary and Lean output.
+The page has two explicit workflows. **Mine statement** pulls a real
+`Mathlib.CategoryTheory` declaration and shows whether the local tactic ladder solved it
+or missed it. If a miss is scored as a good Aristotle candidate, the UI can submit it
+explicitly, poll for status changes, and display the downloaded Aristotle summary and
+Lean output.
 
-There is also an experimental **Propose theorem** path. It adds a small local agentic
-pre-chain inspired by typed discovery systems:
+**Propose theorem** adds a small local agentic pre-chain inspired by typed discovery
+systems:
 
 1. create an open need,
 2. attach a mined Mathlib seed as context,
@@ -80,10 +83,11 @@ pre-chain inspired by typed discovery systems:
 4. wait at an explicit Aristotle gate.
 
 From there, **Formalize with Aristotle** runs a waited Aristotle formalization job,
-downloads the result archive, and extracts a Lean statement. If the statement parses
-locally, **Send to Aristotle** can submit the generated theorem as a proof-filling job.
-This path is not a claim of novelty or truth; it is a controlled way to create candidate
-conjectures with visible provenance and gates.
+downloads the result archive, and extracts a Lean proposition. The extractor handles
+both theorem/example outputs and Aristotle files shaped as `def name : Prop := ...`. If
+the proposition parses locally, **Send to Aristotle** can submit the generated theorem as
+a proof-filling job. This path is not a claim of novelty or truth; it is a controlled way
+to create candidate conjectures with visible provenance and gates.
 
 Tests and replay fixtures do not contact Aristotle. Live Aristotle calls happen only
 when the UI submit button or a live Aristotle command is used deliberately.
@@ -174,7 +178,7 @@ lake exe miner-report --limit 2 --max-tier 0 --json
 
 ## Agentic Theorem Proposal
 
-The proposal path is the first step beyond proof reconstruction. It borrows a minimal
+The proposal path is the first step beyond mining known proofs. It borrows a minimal
 structure from self-revising discovery systems: every generated theorem proposal is an
 artifact with provenance, an open need, a seed, a proposal, and a gate.
 
@@ -184,7 +188,7 @@ templates and attaches mined Mathlib context. Aristotle is used only after an ex
 click, first for prose-to-Lean formalization and then, optionally, for proof filling.
 
 Optionally, the proposal stage can call a cheap OpenAI or Anthropic model for the prose
-theorem proposal:
+theorem proposal. The model is only proposing prose; it is not producing trusted Lean:
 
 ```sh
 export THEOREM_PROPOSER_PROVIDER=openai      # or anthropic
