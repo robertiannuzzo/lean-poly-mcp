@@ -376,7 +376,7 @@ async function formalizeWithAristotle() {
   if (!currentProposal) return;
   const button = $("formalizeAristotle");
   button.disabled = true;
-  $("formalizeMeta").textContent = "Asking Aristotle to formalize the prose theorem...";
+  $("formalizeMeta").textContent = "Waiting for Aristotle to formalize the prose theorem...";
   $("formalizeResult").innerHTML = "";
   const response = await (await fetch("/api/aristotle-formalize", {
     method: "POST",

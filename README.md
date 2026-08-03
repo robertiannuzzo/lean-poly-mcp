@@ -79,10 +79,11 @@ pre-chain inspired by typed discovery systems:
 3. propose a category theory theorem in prose from a typed template,
 4. wait at an explicit Aristotle gate.
 
-From there, **Formalize with Aristotle** can translate the prose into a Lean statement.
-If the statement parses locally, **Send to Aristotle** can submit the generated theorem
-as a proof-filling job. This path is not a claim of novelty or truth; it is a controlled
-way to create candidate conjectures with visible provenance and gates.
+From there, **Formalize with Aristotle** runs a waited Aristotle formalization job,
+downloads the result archive, and extracts a Lean statement. If the statement parses
+locally, **Send to Aristotle** can submit the generated theorem as a proof-filling job.
+This path is not a claim of novelty or truth; it is a controlled way to create candidate
+conjectures with visible provenance and gates.
 
 Tests and replay fixtures do not contact Aristotle. Live Aristotle calls happen only
 when the UI submit button or a live Aristotle command is used deliberately.
@@ -216,7 +217,7 @@ This keeps the spend boundary and trust boundary clean:
 | stage | local or external | trusted? |
 |---|---|---|
 | propose theorem in prose | local or cheap API | no, it is just a candidate |
-| formalize prose to Lean | Aristotle | no, local parsing only checks shape |
+| formalize prose to Lean | Aristotle job + local archive extraction | no, local parsing only checks shape |
 | fill proof | Aristotle | no, output must be rechecked |
 | verify proof | local Lean oracle | yes, subject to the stated axiom whitelist |
 
@@ -294,9 +295,10 @@ Aristotle has two roles:
 | `formalize` | prose or LaTeX to a Lean statement |
 | `submit` | fill `sorry`s in a Lean project |
 
-The demo currently emphasizes `submit`: mine a known Mathlib theorem statement, create
-a small Lean project with `theorem cand : ... := by sorry`, submit it to Aristotle, poll
-the job, download the result, and display the summary and Lean file.
+The demo currently emphasizes `submit`: mine a known Mathlib theorem statement or
+formalize a generated prose proposal, create a small Lean project with
+`theorem cand : ... := by sorry`, submit it to Aristotle, poll the job, download the
+result, and display the summary and Lean file.
 
 Downloaded Aristotle output is not evidence until it is rechecked locally by the oracle.
 Replay fixtures cover Aristotle paths offline so normal tests do not spend credits or

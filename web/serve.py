@@ -130,7 +130,10 @@ def score_candidate(entry):
     reasons = []
     score = 0
 
-    if generated:
+    if verdict == "unusable":
+        score -= 45
+        reasons.append("statement did not parse locally")
+    elif generated:
         score += 35
         reasons.append("agentic conjecture; not known to be in Mathlib")
     elif verdict == "interesting_miss":
@@ -280,26 +283,36 @@ class AgenticProposer:
             f"{prose}\n",
             encoding="utf-8",
         )
+        archive = path / "formalize.tar.gz"
+        extract_dir = path / "formalize"
+        extract_dir.mkdir(exist_ok=True)
         out = subprocess.run(
-            ["aristotle", "formalize", str(input_file)],
+            ["aristotle", "formalize", str(input_file), "--wait", "--destination", str(archive)],
             cwd=ROOT,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=900,
             env=os.environ.copy(),
         )
         (path / "formalize.stdout").write_text(out.stdout, encoding="utf-8")
         (path / "formalize.stderr").write_text(out.stderr, encoding="utf-8")
+        raw = (out.stdout + "\n" + out.stderr).strip()
         if out.returncode != 0:
-            raw_error = (out.stderr or out.stdout or "aristotle formalize failed").strip()
+            raw_error = raw or "aristotle formalize failed"
             return {
                 "error": summarize_aristotle_error(raw_error),
                 "raw": raw_error[-2400:],
             }
-        raw = (out.stdout + "\n" + out.stderr).strip()
-        statement = parse_formalized_statement(raw)
+        project_id = AristotleJobs.parse_project_id(raw)
+        if archive.exists() and archive.stat().st_size > 0:
+            try:
+                safe_extract_archive(archive, extract_dir)
+            except (tarfile.TarError, OSError) as e:
+                return {"error": f"formalization archive downloaded, but could not extract it: {e}", "raw": raw[-2400:]}
+        formalized = collect_formalization_text(extract_dir, raw)
+        statement = parse_formalized_statement(formalized)
         if not statement:
-            return {"error": "could not parse Aristotle formalization", "raw": raw[-2000:]}
+            return {"error": "could not parse Aristotle formalization", "raw": formalized[-2400:] or raw[-2400:]}
         well_formed = is_well_formed_statement(statement)
         entry = {
             "source": "agentic_conjecture",
@@ -315,7 +328,14 @@ class AgenticProposer:
             "proposal": proposal,
         }
         entry["quality"] = score_candidate(entry)
-        record = {"proposal": proposal, "raw": raw, "wellFormed": well_formed, "entry": entry}
+        record = {
+            "proposal": proposal,
+            "raw": raw,
+            "projectId": project_id,
+            "wellFormed": well_formed,
+            "entry": entry,
+            "formalizationFiles": [str(p.relative_to(extract_dir)) for p in extract_dir.rglob("*") if p.is_file()][:80],
+        }
         (path / "formalization.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
         return record
 
@@ -540,6 +560,22 @@ def parse_formalized_statement(text):
             continue
         lines.append(line)
     text = "\n".join(lines).strip()
+    if text.startswith("Project created:"):
+        return ""
+    theorem = re.search(
+        r"\btheorem\s+\S+\s*:\s*(.*?)(?:\s*:=\s*by\s+sorry|\s*:=\s*sorry|\s*:=\s*by\b|$)",
+        text,
+        flags=re.DOTALL,
+    )
+    if theorem:
+        return theorem.group(1).strip()
+    example = re.search(
+        r"\bexample\s*:\s*(.*?)(?:\s*:=\s*by\s+sorry|\s*:=\s*sorry|\s*:=\s*by\b|$)",
+        text,
+        flags=re.DOTALL,
+    )
+    if example:
+        return example.group(1).strip()
     if text.startswith("#check"):
         text = text[len("#check"):].strip()
     elif text.startswith("example :"):
@@ -552,6 +588,32 @@ def parse_formalized_statement(text):
         if suffix in text:
             text = text.split(suffix, 1)[0].strip()
     return text
+
+
+def safe_extract_archive(archive, extract_dir):
+    with tarfile.open(archive, "r:*") as tar:
+        root = extract_dir.resolve()
+        for member in tar.getmembers():
+            target = (extract_dir / member.name).resolve()
+            if not str(target).startswith(str(root) + os.sep):
+                raise tarfile.TarError(f"unsafe archive path: {member.name}")
+        tar.extractall(extract_dir)
+
+
+def collect_formalization_text(extract_dir, raw):
+    lean_texts = []
+    text_texts = []
+    for path in extract_dir.rglob("*"):
+        if not path.is_file() or ".lake" in path.parts:
+            continue
+        if path.suffix == ".lean":
+            lean_texts.append(path.read_text(encoding="utf-8", errors="replace"))
+        elif path.suffix in [".md", ".txt"]:
+            text_texts.append(path.read_text(encoding="utf-8", errors="replace"))
+    for text in lean_texts + text_texts:
+        if parse_formalized_statement(text):
+            return text
+    return "\n".join(lean_texts + text_texts) or raw
 
 
 def summarize_aristotle_error(text):
@@ -684,7 +746,7 @@ class AristotleJobs:
 
         if archive.exists() and archive.stat().st_size > 0:
             try:
-                self.extract_archive(archive, extract_dir)
+                safe_extract_archive(archive, extract_dir)
             except (tarfile.TarError, OSError) as e:
                 return {"downloadError": f"downloaded Aristotle archive, but could not extract it: {e}"}
 
@@ -708,15 +770,6 @@ class AristotleJobs:
             "readme": readme[:4000],
             "downloadFiles": files[:80],
         }
-
-    @staticmethod
-    def extract_archive(archive, extract_dir):
-        with tarfile.open(archive, "r:*") as tar:
-            for member in tar.getmembers():
-                target = (extract_dir / member.name).resolve()
-                if not str(target).startswith(str(extract_dir.resolve()) + os.sep):
-                    raise tarfile.TarError(f"unsafe archive path: {member.name}")
-            tar.extractall(extract_dir)
 
     @staticmethod
     def read_first(root, name):
