@@ -203,6 +203,10 @@ export THEOREM_PROPOSER_TIMEOUT=45
 `THEOREM_PROPOSER_TEMPERATURE` is available for providers/models that support it. The
 OpenAI `gpt-5-nano` proposer uses that model's default temperature because the API
 rejects custom temperature values for it.
+OpenAI Responses API output caps include hidden reasoning tokens, so the server enforces
+a safer OpenAI floor of `OPENAI_PROPOSER_MIN_OUTPUT_TOKENS=2000` even when the visible
+JSON proposal is short. This is still only a cap; typical charged output should be much
+smaller.
 
 If the configured provider fails or is missing a key/model, the UI records the error and
 falls back to the local deterministic template. This keeps demo behavior predictable.
