@@ -562,6 +562,13 @@ def parse_formalized_statement(text):
     text = "\n".join(lines).strip()
     if text.startswith("Project created:"):
         return ""
+    definition = re.search(
+        r"\bdef\s+\S+\s*:\s*Prop\s*:=\s*(.*)",
+        text,
+        flags=re.DOTALL,
+    )
+    if definition:
+        return definition.group(1).strip()
     theorem = re.search(
         r"\btheorem\s+\S+\s*:\s*(.*?)(?:\s*:=\s*by\s+sorry|\s*:=\s*sorry|\s*:=\s*by\b|$)",
         text,
