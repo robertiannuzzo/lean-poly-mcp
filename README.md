@@ -225,49 +225,6 @@ This keeps the spend boundary and trust boundary clean:
 | fill proof | Aristotle | no, output must be rechecked |
 | verify proof | local Lean oracle | yes, subject to the stated axiom whitelist |
 
-## How the Self-Revising Discovery Paper Informs This
-
-The paper `Self-Revising Discovery Systems for Science` argues that an agentic
-scientific system should not be treated as a chat transcript or a sequence of answers.
-It should be treated as a typed artifact system: a schema of artifact types and
-operations, a population of artifacts over that schema, a provenance graph, explicit
-gates or verifiers, and a mechanism for regime updates when the current vocabulary is
-too small.
-
-This repo implements a deliberately small version of that idea for category theory.
-The mapping is:
-
-| paper concept | this project |
-|---|---|
-| schema of artifact types and operations | theorem prose, Lean statement, proof candidate, oracle verdict, Aristotle job, downloaded artifact |
-| artifact population | mined Mathlib entries, generated proposals, formalized statements, proof archives, local verification outcomes |
-| provenance graph | `open_need -> seed_context -> cheap_proposer/local_template -> proposal -> Aristotle formalize -> Aristotle submit -> oracle recheck` |
-| gate or verifier | local parser, candidate-quality score, explicit human click, Aristotle status, Lean oracle |
-| open need | "produce a category theory theorem candidate worth formalizing" |
-| fixed-regime search | mine existing `Mathlib.CategoryTheory` statements and try the local tactic ladder |
-| discovery-style move | generate a candidate theorem outside the mined-proof-reconstruction path, then force it through formalization and proof gates |
-| residual content | anything not explained by mining an existing Mathlib theorem: generated prose, Aristotle's formalization, proof proposal, failures and retries |
-
-The distinction matters. The Mathlib miner is fixed-regime search: it operates inside
-the existing Mathlib `CategoryTheory` vocabulary and asks whether a known theorem can be
-reproved. The new `Propose theorem` path is the first controlled step toward the paper's
-"self-revising" picture: it creates an explicit typed hole, records the seed and
-proposal artifact, then waits at gates before any external system can turn that proposal
-into a Lean statement or proof.
-
-The implementation is intentionally conservative. A cheap OpenAI or Anthropic call may
-propose prose, but that prose is just an artifact with lineage. Aristotle may formalize
-or fill a proof, but those are also only artifacts. The trusted transition happens only
-when Lean accepts the final candidate, the axiom audit passes, and the statement matches
-what was requested.
-
-This is not yet a full categorical discovery substrate in the paper's sense. We do not
-yet model the artifact state as a formal copresheaf, compute Kan-extension residuals, or
-prove that the workflow update is an endofunctor on refinements. What we do implement is
-the engineering discipline that the paper says such a substrate needs: stable typed
-artifacts, explicit parent lineage, append-only local records, visible rejection/fallback
-states, and gates that separate proposal from commitment.
-
 ## Trust Model
 
 Everything that produces a proof is untrusted. Lean is the judge.
@@ -371,14 +328,12 @@ Agent/        agent as a lens-driven runtime
 Aristotle/    Aristotle client plus offline replay fixtures
 web/          local demo UI and server
 test/         Lean tests and replay tests
-docs/         longer design notes and paper-style explanation
+docs/         longer design notes and implementation history
 v1-idris/     Idris2 predecessor, preserved for comparison
 ```
 
 ## Further Reading
 
-- [`docs/paper-style-explanation.md`](docs/paper-style-explanation.md) gives the longer
-  research narrative.
 - [`docs/lean-upgrade-plan.md`](docs/lean-upgrade-plan.md) records the implementation
   phases and design history.
 - [`v1-idris/`](v1-idris/) contains the predecessor system.
