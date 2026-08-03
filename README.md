@@ -197,9 +197,12 @@ Useful optional knobs:
 
 ```sh
 export THEOREM_PROPOSER_MAX_TOKENS=450
-export THEOREM_PROPOSER_TEMPERATURE=0.4
 export THEOREM_PROPOSER_TIMEOUT=45
 ```
+
+`THEOREM_PROPOSER_TEMPERATURE` is available for providers/models that support it. The
+OpenAI `gpt-5-nano` proposer uses that model's default temperature because the API
+rejects custom temperature values for it.
 
 If the configured provider fails or is missing a key/model, the UI records the error and
 falls back to the local deterministic template. This keeps demo behavior predictable.

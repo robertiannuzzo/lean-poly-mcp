@@ -420,7 +420,6 @@ def call_openai_proposer(provider, system, user):
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": provider["temperature"],
         "max_completion_tokens": provider["max_tokens"],
         "response_format": {"type": "json_object"},
     }
