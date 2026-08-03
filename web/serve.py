@@ -414,15 +414,10 @@ def call_openai_proposer(provider, system, user):
     key = os.environ.get("OPENAI_API_KEY", "")
     if not key:
         raise ProposerError("OPENAI_API_KEY is not set")
-    max_output_tokens = max(
-        provider["max_tokens"],
-        int(os.environ.get("OPENAI_PROPOSER_MIN_OUTPUT_TOKENS", "2000")),
-    )
     payload = {
         "model": provider["model"],
         "instructions": system,
         "input": user,
-        "max_output_tokens": max_output_tokens,
         "text": {
             "format": {
                 "type": "json_schema",
