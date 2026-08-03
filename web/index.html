@@ -190,6 +190,18 @@
     overflow-y: hidden;
     max-width: 100%;
   }
+  .math-fallback {
+    display: inline-block;
+    font-family: "Times New Roman", "STIX Two Text", Georgia, serif;
+    font-style: italic;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+  .math-display-fallback {
+    display: block;
+    margin: 8px 0;
+    overflow-x: auto;
+  }
   .meta {
     color: var(--muted);
     font-size: 12.5px;
@@ -247,11 +259,13 @@
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const attrEsc = s => esc(s).replace(/"/g, "&quot;");
 let currentEntry = null;
 let currentProjectId = null;
 let currentProposal = null;
 let aristotlePollTimer = null;
 let aristotleStatusHistory = [];
+let mathJaxLoadTimer = null;
 
 function hasTexDelimiters(s) {
   return /\\\(|\\\[|\$\$|(^|[^\\])\$/.test(String(s));
@@ -272,10 +286,134 @@ function proseHtml(s) {
   return esc(latexizePlainCategoryText(s)).replace(/\n/g, "<br>");
 }
 
-function renderMath(root = $("result")) {
-  if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
-    window.MathJax.typesetPromise([root]).catch(() => {});
+function formatTexFallback(tex, display = false) {
+  const commands = {
+    to: "→",
+    gets: "←",
+    mapsto: "↦",
+    simeq: "≃",
+    cong: "≅",
+    approx: "≈",
+    sim: "∼",
+    circ: "∘",
+    cdot: "·",
+    times: "×",
+    prod: "∏",
+    coprod: "∐",
+    colim: "colim",
+    lim: "lim",
+    forall: "∀",
+    exists: "∃",
+    in: "∈",
+    alpha: "α",
+    beta: "β",
+    gamma: "γ",
+    delta: "δ",
+    eta: "η",
+    epsilon: "ε",
+    lambda: "λ",
+    mu: "μ",
+    pi: "π",
+    sigma: "σ",
+    tau: "τ",
+    phi: "φ",
+    psi: "ψ",
+    omega: "ω",
+    Alpha: "Α",
+    Beta: "Β",
+    Gamma: "Γ",
+    Delta: "Δ",
+    Lambda: "Λ",
+    Pi: "Π",
+    Sigma: "Σ",
+    Omega: "Ω",
+    Rightarrow: "⇒",
+    Leftarrow: "⇐",
+    Leftrightarrow: "⇔",
+    rightarrow: "→",
+    leftarrow: "←",
+  };
+  let out = String(tex).trim();
+  out = out.replace(/\\operatorname\{([^{}]+)\}/g, "$1");
+  out = out.replace(/\\mathrm\{([^{}]+)\}/g, "$1");
+  out = out.replace(/\\mathcal\{([^{}]+)\}/g, "$1");
+  out = out.replace(/\\mathbf\{([^{}]+)\}/g, "$1");
+  out = out.replace(/\\,/g, " ");
+  out = out.replace(/\\([A-Za-z]+)/g, (_, cmd) => commands[cmd] || cmd);
+  out = out.replace(/\s+/g, " ");
+  let html = esc(out);
+  html = html.replace(/\_\{([^{}]+)\}/g, "<sub>$1</sub>");
+  html = html.replace(/\^\{([^{}]+)\}/g, "<sup>$1</sup>");
+  html = html.replace(/\_([A-Za-z0-9]+)/g, "<sub>$1</sub>");
+  html = html.replace(/\^([A-Za-z0-9+\-]+)/g, "<sup>$1</sup>");
+  html = html.replace(/[{}]/g, "");
+  const cls = display ? "math-fallback math-display-fallback" : "math-fallback";
+  return `<span class="${cls}">${html}</span>`;
+}
+
+function fallbackProseHtml(s) {
+  const text = latexizePlainCategoryText(s);
+  const delims = [
+    { open: "\\[", close: "\\]", display: true },
+    { open: "\\(", close: "\\)", display: false },
+    { open: "$$", close: "$$", display: true },
+    { open: "$", close: "$", display: false },
+  ];
+  let html = "";
+  let i = 0;
+  while (i < text.length) {
+    let found = null;
+    for (const d of delims) {
+      const at = text.indexOf(d.open, i);
+      if (at !== -1 && (!found || at < found.at)) {
+        found = { ...d, at };
+      }
+    }
+    if (!found) {
+      html += esc(text.slice(i)).replace(/\n/g, "<br>");
+      break;
+    }
+    html += esc(text.slice(i, found.at)).replace(/\n/g, "<br>");
+    const bodyStart = found.at + found.open.length;
+    const bodyEnd = text.indexOf(found.close, bodyStart);
+    if (bodyEnd === -1) {
+      html += esc(text.slice(found.at)).replace(/\n/g, "<br>");
+      break;
+    }
+    html += formatTexFallback(text.slice(bodyStart, bodyEnd), found.display);
+    i = bodyEnd + found.close.length;
   }
+  return html;
+}
+
+function applyMathFallback(root = $("result")) {
+  root.querySelectorAll(".math-source").forEach(el => {
+    if (el.querySelector("mjx-container")) return;
+    el.innerHTML = fallbackProseHtml(el.dataset.raw || el.textContent);
+    el.dataset.renderedFallback = "true";
+  });
+}
+
+function renderMath(root = $("result")) {
+  if (mathJaxLoadTimer) {
+    clearTimeout(mathJaxLoadTimer);
+    mathJaxLoadTimer = null;
+  }
+  const typeset = () => {
+    if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+      window.MathJax.typesetPromise([root]).catch(() => applyMathFallback(root));
+      return true;
+    }
+    return false;
+  };
+  if (!typeset()) {
+    mathJaxLoadTimer = setTimeout(() => {
+      if (!typeset()) applyMathFallback(root);
+    }, 1000);
+  }
+  setTimeout(() => {
+    if (!root.querySelector("mjx-container")) applyMathFallback(root);
+  }, 1800);
 }
 
 function stopAristotlePolling() {
@@ -400,12 +538,12 @@ function renderProposal(data) {
     ${proposal.provider?.fallback ? `<div class="panel" style="padding:12px; margin-top:12px"><span class="meta">Provider fallback: ${esc(proposal.provider.error || "using local proposal")}</span></div>` : ""}
 
     <div class="label" style="margin-top:14px">Proposed theorem in prose</div>
-    <div class="summary-box math-prose">${proseHtml(proposal.prose)}</div>
+    <div class="summary-box math-prose math-source" data-raw="${attrEsc(proposal.prose)}">${proseHtml(proposal.prose)}</div>
 
     <div class="panel" style="padding:12px; margin-top:12px">
       <div class="label">Self-revising discovery chain</div>
       <ul class="reasons">
-        ${(proposal.chain || []).map(step => `<li><strong>${esc(step.artifact)}</strong> · ${esc(step.status)} · ${proseHtml(step.text)}</li>`).join("")}
+        ${(proposal.chain || []).map(step => `<li><strong>${esc(step.artifact)}</strong> · ${esc(step.status)} · <span class="math-source" data-raw="${attrEsc(step.text)}">${proseHtml(step.text)}</span></li>`).join("")}
       </ul>
     </div>
 
