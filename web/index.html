@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Category Theory Miner and Proposer</title>
+<script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [["\\(", "\\)"], ["$", "$"]],
+      displayMath: [["\\[", "\\]"], ["$$", "$$"]],
+      processEscapes: true
+    },
+    svg: { fontCache: "global" },
+    startup: { typeset: false }
+  };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <style>
   :root {
     --bg: #f7f7f4;
@@ -164,6 +176,20 @@
     font: 14px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     white-space: pre-wrap;
   }
+  .math-prose {
+    overflow: auto;
+    margin: 10px 0 0;
+    padding: 13px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--code);
+    color: var(--ink);
+  }
+  .math-prose mjx-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+  }
   .meta {
     color: var(--muted);
     font-size: 12.5px;
@@ -226,6 +252,31 @@ let currentProjectId = null;
 let currentProposal = null;
 let aristotlePollTimer = null;
 let aristotleStatusHistory = [];
+
+function hasTexDelimiters(s) {
+  return /\\\(|\\\[|\$\$|(^|[^\\])\$/.test(String(s));
+}
+
+function latexizePlainCategoryText(s) {
+  let out = String(s);
+  if (hasTexDelimiters(out)) return out;
+  out = out.replace(/\b([A-Z][A-Za-z0-9']*)\s*:\s*([A-Z][A-Za-z0-9']*)\s*→\s*([A-Z][A-Za-z0-9']*)/g, "\\($1 : $2 \\to $3\\)");
+  out = out.replace(/\b([A-Z][A-Za-z0-9']*)\s*:\s*([A-Z][A-Za-z0-9']*)\s*->\s*([A-Z][A-Za-z0-9']*)/g, "\\($1 : $2 \\to $3\\)");
+  out = out.replace(/\b([A-Za-z][A-Za-z0-9']*)\s*∘\s*([A-Za-z][A-Za-z0-9']*)/g, "\\($1 \\circ $2\\)");
+  out = out.replace(/\bcolim_([A-Za-z0-9]+)\s*\(([^)]+)\)/g, "\\(\\operatorname{colim}_{$1}($2)\\)");
+  out = out.replace(/\bcolim_([A-Za-z0-9]+)\s+([A-Za-z][A-Za-z0-9']*)/g, "\\(\\operatorname{colim}_{$1} $2\\)");
+  return out;
+}
+
+function proseHtml(s) {
+  return esc(latexizePlainCategoryText(s)).replace(/\n/g, "<br>");
+}
+
+function renderMath(root = $("result")) {
+  if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+    window.MathJax.typesetPromise([root]).catch(() => {});
+  }
+}
 
 function stopAristotlePolling() {
   if (aristotlePollTimer) {
@@ -349,12 +400,12 @@ function renderProposal(data) {
     ${proposal.provider?.fallback ? `<div class="panel" style="padding:12px; margin-top:12px"><span class="meta">Provider fallback: ${esc(proposal.provider.error || "using local proposal")}</span></div>` : ""}
 
     <div class="label" style="margin-top:14px">Proposed theorem in prose</div>
-    <pre class="summary-box">${esc(proposal.prose)}</pre>
+    <div class="summary-box math-prose">${proseHtml(proposal.prose)}</div>
 
     <div class="panel" style="padding:12px; margin-top:12px">
       <div class="label">Self-revising discovery chain</div>
       <ul class="reasons">
-        ${(proposal.chain || []).map(step => `<li><strong>${esc(step.artifact)}</strong> · ${esc(step.status)} · ${esc(step.text)}</li>`).join("")}
+        ${(proposal.chain || []).map(step => `<li><strong>${esc(step.artifact)}</strong> · ${esc(step.status)} · ${proseHtml(step.text)}</li>`).join("")}
       </ul>
     </div>
 
@@ -370,6 +421,7 @@ function renderProposal(data) {
     <div id="formalizeResult"></div>
   `;
   $("formalizeAristotle").onclick = formalizeWithAristotle;
+  renderMath();
 }
 
 async function formalizeWithAristotle() {

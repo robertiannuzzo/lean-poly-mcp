@@ -342,43 +342,48 @@ class AgenticProposer:
 
 PROPOSAL_TEMPLATES = [
     {
-        "topic": "isomorphisms",
-        "title": "isomorphisms compose with reversed inverse",
+        "topic": "equivalences / limits",
+        "title": "equivalences transport colimit witnesses",
         "prose": (
-            "In any category, if f is an isomorphism from X to Y and g is an isomorphism "
-            "from Y to Z, then the composite f followed by g is an isomorphism from X to Z, "
-            "and its inverse is g inverse followed by f inverse."
+            "Let \\(E : C \\simeq D\\) be an equivalence of categories and let "
+            "\\(K : J \\to C\\) be a small diagram. If a cocone \\(s\\) is colimiting for "
+            "\\(K\\), then the cocone obtained by applying \\(E\\) to every object and map "
+            "of \\(s\\) is colimiting for \\(E \\circ K\\)."
         ),
-        "rationale": "Tests a basic closure law and whether the prover finds existing category isomorphism API.",
+        "rationale": "Combines equivalences with the limits API and asks Aristotle to find transport machinery rather than a first-order closure lemma.",
     },
     {
-        "topic": "natural transformations",
-        "title": "componentwise isomorphism is stable under composition",
+        "topic": "natural transformations / colimits",
+        "title": "objectwise diagram isomorphisms transport colimits",
         "prose": (
-            "For functors F, G, and H between two categories, if a natural transformation "
-            "from F to G is componentwise an isomorphism and a natural transformation from "
-            "G to H is componentwise an isomorphism, then their vertical composite is "
-            "componentwise an isomorphism."
+            "For diagrams \\(K,L : J \\to C\\), suppose \\(\\alpha : K \\Rightarrow L\\) is "
+            "a natural isomorphism. Then any colimit cocone for \\(K\\) can be transported "
+            "along \\(\\alpha\\) to a colimit cocone for \\(L\\)."
         ),
-        "rationale": "Uses typed artifacts already visible in mined NatTrans statements but asks for a new formulation.",
+        "rationale": "Uses natural isomorphisms as structure-preserving rewrites of diagram-level universal properties.",
     },
     {
         "topic": "adjunctions",
         "title": "left adjoints preserve colimits",
         "prose": (
-            "Given an adjunction between two categories, the left adjoint preserves colimits "
-            "of any fixed shape whenever those colimits exist."
+            "If \\(F : C \\to D\\) has a right adjoint, then \\(F\\) preserves every small "
+            "colimit that exists in \\(C\\). Equivalently, for every small diagram "
+            "\\(K : J \\to C\\) with colimit \\(\\operatorname{colim}_J K\\), the canonical "
+            "comparison map \\(\\operatorname{colim}_J(F \\circ K) \\to "
+            "F(\\operatorname{colim}_J K)\\) is an isomorphism in \\(D\\)."
         ),
         "rationale": "A conceptual category theory fact that should push Aristotle toward Mathlib's adjunction/limits API.",
     },
     {
-        "topic": "yoneda",
-        "title": "Yoneda reflects isomorphisms",
+        "topic": "yoneda / limits",
+        "title": "Yoneda detects limiting cones",
         "prose": (
-            "In a locally small category, if the images of two objects under the Yoneda "
-            "embedding are isomorphic, then the original objects are isomorphic."
+            "Let \\(K : J \\to C\\) be a small diagram and let \\(c\\) be a cone over "
+            "\\(K\\). If for every object \\(X : C\\), applying the representable functor "
+            "\\(\\operatorname{Hom}(X,-)\\) sends \\(c\\) to a limiting cone of types, then "
+            "\\(c\\) is a limiting cone in \\(C\\)."
         ),
-        "rationale": "A compact representability-style theorem with a clear CategoryTheory target vocabulary.",
+        "rationale": "A representability-flavored universal-property test that is more Mathlib-adjacent than a bare Yoneda isomorphism claim.",
     },
 ]
 
@@ -406,15 +411,22 @@ def call_proposer_provider(provider, seed, template):
     system = (
         "You propose category theory theorem candidates for a Lean 4/Mathlib demo. "
         "Return only compact JSON with keys title, topic, prose, rationale. "
-        "Do not write Lean syntax. Do not claim novelty. Prefer plausible, theorem-shaped "
-        "category theory statements that Aristotle can later formalize."
+        "Do not write Lean syntax. Do not claim novelty. Write mathematical notation "
+        "in LaTeX inside \\( ... \\) or \\[ ... \\]. Prefer intermediate, "
+        "Mathlib-adjacent statements that combine at least two category-theory mechanisms, "
+        "such as adjunctions with limits, equivalences with universal properties, Yoneda "
+        "with cones, or natural isomorphisms with diagram transport. Avoid first-week "
+        "facts like identity laws, functors preserving isomorphisms, or bare composition "
+        "of isomorphisms unless they are part of a richer statement."
     )
     user = (
         "Use this mined Mathlib context as inspiration, but propose a theorem in prose, "
-        "not a copy of the seed.\n\n"
+        "not a copy of the seed. Generate a plausible exploration target, not a claim "
+        "of mathematical novelty. Keep it formalizable as one Lean proposition.\n\n"
         f"Seed declaration: {seed.get('name', '')}\n"
         f"Seed topic: {seed.get('topic', '')}\n"
         f"Seed local result: {seed.get('summary', '')}\n\n"
+        f"Seed statement excerpt: {seed.get('statement', '')[:900]}\n\n"
         "A safe local fallback proposal would be:\n"
         f"Title: {template['title']}\n"
         f"Topic: {template['topic']}\n"
