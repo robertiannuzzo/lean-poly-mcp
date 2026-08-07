@@ -78,10 +78,11 @@ class MineCache:
             entries = report.get("entries", [])
             if not entries:
                 return {"error": "miner report returned no entries"}
-            item = entries[self.index % len(entries)]
+            pos = self.index % len(entries)
+            item = entries[pos]
             self.index += 1
             return {
-                "index": self.index,
+                "index": pos + 1,
                 "count": len(entries),
                 "report": {k: report.get(k) for k in ["importMs", "total", "solved", "misses", "unusable"]},
                 "entry": {**item, "quality": score_candidate(item)},
@@ -314,6 +315,8 @@ class AgenticProposer:
         if not statement:
             return {"error": "could not parse Aristotle formalization", "raw": formalized[-2400:] or raw[-2400:]}
         well_formed = is_well_formed_statement(statement)
+        summary = read_first(extract_dir, "ARISTOTLE_SUMMARY.md")
+        readme = read_first(extract_dir, "README.md")
         entry = {
             "source": "agentic_conjecture",
             "kind": "conjecture",
@@ -334,6 +337,8 @@ class AgenticProposer:
             "projectId": project_id,
             "wellFormed": well_formed,
             "entry": entry,
+            "summary": summary[:8000],
+            "readme": readme[:4000],
             "formalizationFiles": [str(p.relative_to(extract_dir)) for p in extract_dir.rglob("*") if p.is_file()][:80],
         }
         (path / "formalization.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
@@ -619,6 +624,13 @@ def safe_extract_archive(archive, extract_dir):
         tar.extractall(extract_dir)
 
 
+def read_first(root, name):
+    for path in root.rglob(name):
+        if ".lake" not in path.parts:
+            return path.read_text(encoding="utf-8", errors="replace")
+    return ""
+
+
 def collect_formalization_text(extract_dir, raw):
     lean_texts = []
     text_texts = []
@@ -778,8 +790,8 @@ class AristotleJobs:
                 proof = text
                 proof_path = str(path)
                 break
-        summary = self.read_first(extract_dir, "ARISTOTLE_SUMMARY.md")
-        readme = self.read_first(extract_dir, "README.md")
+        summary = read_first(extract_dir, "ARISTOTLE_SUMMARY.md")
+        readme = read_first(extract_dir, "README.md")
         files = [str(p.relative_to(extract_dir)) for p in extract_dir.rglob("*") if p.is_file()]
         return {
             "downloaded": True,
@@ -789,13 +801,6 @@ class AristotleJobs:
             "readme": readme[:4000],
             "downloadFiles": files[:80],
         }
-
-    @staticmethod
-    def read_first(root, name):
-        for path in root.rglob(name):
-            if ".lake" not in path.parts:
-                return path.read_text(encoding="utf-8", errors="replace")
-        return ""
 
     def load_record(self, project_id):
         for path in JOB_ROOT.glob("*/job.json"):

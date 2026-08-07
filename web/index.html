@@ -286,6 +286,21 @@ function proseHtml(s) {
   return esc(latexizePlainCategoryText(s)).replace(/\n/g, "<br>");
 }
 
+function sourceProposalHtml(entry) {
+  const proposal = entry.proposal || {};
+  if (!proposal.prose) return "";
+  return `
+    <div class="label" style="margin-top:14px">Original prose proposal</div>
+    <div class="summary-box math-prose math-source" data-raw="${attrEsc(proposal.prose)}">${proseHtml(proposal.prose)}</div>
+    ${proposal.rationale ? `
+      <div class="panel" style="padding:12px; margin-top:12px">
+        <div class="label">Rationale</div>
+        <div class="meta">${esc(proposal.rationale)}</div>
+      </div>
+    ` : ""}
+  `;
+}
+
 function formatTexFallback(tex, display = false) {
   const commands = {
     to: "→",
@@ -502,11 +517,23 @@ function render(data) {
       corpus: ${data.report.total} statements · ${data.report.solved} solved · ${data.report.misses} misses · Mathlib import ${data.report.importMs} ms
     </div>
 
+    ${data.formalizationSummary ? `
+      <div class="label" style="margin-top:14px">Aristotle formalization summary</div>
+      <pre class="summary-box">${esc(data.formalizationSummary)}</pre>
+    ` : ""}
+    ${data.formalizationReadme ? `
+      <div class="label" style="margin-top:14px">Aristotle formalization README</div>
+      <pre class="summary-box">${esc(data.formalizationReadme)}</pre>
+    ` : ""}
+
+    ${sourceProposalHtml(entry)}
+
     <div class="label" style="margin-top:14px">Lean statement</div>
     <pre>${esc(entry.statement)}</pre>
   `;
   $("sendAristotle").onclick = sendToAristotle;
   $("pollAristotle").onclick = pollAristotle;
+  renderMath();
 }
 
 function renderProposal(data) {
@@ -589,7 +616,9 @@ async function formalizeWithAristotle() {
     count: 1,
     report: { total: 1, solved: 0, misses: response.wellFormed ? 1 : 0, unusable: response.wellFormed ? 0 : 1, importMs: 0 },
     entry: response.entry,
-    message: "Agentic pre-chain produced prose, Aristotle formalized it, and the local parser checked the statement shape."
+    message: "Agentic pre-chain produced prose, Aristotle formalized it, and the local parser checked the statement shape.",
+    formalizationSummary: response.summary || "",
+    formalizationReadme: response.readme || ""
   });
 }
 
